@@ -75,6 +75,11 @@ function generateUniqueSessionId() {
     return crypto.randomBytes(16).toString('hex');
 }
 
+function isValidParam(value) {
+    return /^[a-zA-Z0-9\-]+$/.test(value); // Alphanumeric and hyphens only
+  }
+  
+
 // Test route
 app.get('/', (req, res) => {
   res.send('QR Tracking App is running!');
@@ -90,7 +95,15 @@ app.get('/track/:code', async (req, res) => {
     console.log("Tracking QR code via GET /track/:code");
 
     const { code } = req.params;
+    if (!isValidParam(code)) {
+        return res.status(400).send('Invalid code format.');
+    }
+
+
     const [adId, locationId] = code.split('-');
+    if (!isValidParam(adId) || !isValidParam(locationId)) {
+        return res.status(400).send('Invalid ad or location ID.');
+    }
     const locationName = locations[locationId];
     let userSessionId = req.cookies.userSessionId;
     const ipAddress = req.ip;
@@ -161,6 +174,9 @@ app.get('/scans', async (req, res) => {
 // Replace this route
 app.get('/scan/:adId-:locationId', async (req, res) => {
     const { adId, locationId } = req.params;
+    if (!isValidParam(adId) || !isValidParam(locationId)) {
+        return res.status(400).send('Invalid ad or location ID.');
+    }
     const code = `${adId}-${locationId}`;
   
     try {
@@ -186,6 +202,9 @@ app.get('/scan/:adId-:locationId', async (req, res) => {
 // Generate QR code for a given ad and location
 app.get('/generate-qr/:adId/:locationId', (req, res) => {
     const { adId, locationId } = req.params;
+    if (!isValidParam(adId) || !isValidParam(locationId)) {
+        return res.status(400).send('Invalid ad or location ID.');
+    }
     
     // Dynamically build the URL based on the host
     const protocol = req.protocol; // e.g., 'http' or 'https'
