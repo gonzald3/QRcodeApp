@@ -132,7 +132,7 @@ app.post('/track/:code', async (req, res) => {
         await newScan.save();
         console.log('Scan logged successfully:', newScan); // Log successful save
         // Redirect user to a URL (can be customized based on the code)
-        res.redirect(`https://yourdestination.com/${adId}-${locationId}`);
+        res.redirect(`/scan`);
     } catch (error) {
         console.error('Error saving scan to database:', error);
         res.status(500).send('Error tracking QR code scan.');
@@ -162,6 +162,47 @@ app.get('/scans', async (req, res) => {
         res.status(500).send('Error retrieving scans.');
     }
 });
+
+// Serve the redirect page after scanning QR code
+app.get('/scan/:adId-:locationId', (req, res) => {
+    const { adId, locationId } = req.params;
+    const code = `${adId}-${locationId}`;
+    
+    res.send(`
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Scan Redirect</title>
+        </head>
+        <body>
+            <h1>Thank you for scanning the QR Code!</h1>
+            <script>
+                // Automatically send POST request after page loads
+                window.onload = async () => {
+                    const code = "${code}"; // Dynamically set the code
+                    const response = await fetch('/track/' + code, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ code })
+                    });
+
+                    if (response.ok) {
+                        // Redirect the user after POST
+                        window.location.href = "https://yourdestination.com/success";
+                    } else {
+                        alert("Error tracking QR code scan.");
+                    }
+                };
+            </script>
+        </body>
+        </html>
+    `);
+});
+
 
 // Generate QR code for a given ad and location
 app.get('/generate-qr/:adId/:locationId', (req, res) => {
