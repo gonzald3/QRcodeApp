@@ -14,7 +14,11 @@ const port = process.env.PORT || 5000;
 // Set the trust proxy to handle correct IP forwarding when behind a proxy (like Heroku)
 app.set('trust proxy', 1); // This is important when using Heroku or similar platforms
 const cors = require('cors');
-app.use(cors()); // You can also specify options here if needed
+const corsOptions = {
+    origin: ['https://yourfrontend.com', 'https://qrcodeapplication-4ecfc40322a3.herokuapp.com'], // add all expected domains
+    credentials: true
+};
+app.use(cors(corsOptions));
 
 // Rate limit for tracking QR codes (POST /track)
 const limiter = rateLimit({
@@ -99,6 +103,7 @@ app.post('/track/:code', async (req, res) => {
 
     console.log('Session ID:', req.cookies.userSessionId);
     console.log('Received code:', req.body.code);
+    console.log("POST /track hit!")
 
     if (!userSessionId) {
         // Generate a new session ID for the user if it doesn't exist
