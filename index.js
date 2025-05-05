@@ -161,7 +161,10 @@ app.get('/scans', async (req, res) => {
 app.get('/generate-qr/:adId/:locationId', (req, res) => {
     const { adId, locationId } = req.params;
     
-    const url = `http://localhost:5000/track/${adId}-${locationId}`;  // Unique URL for each ad-location pair
+    // Dynamically build the URL based on the host
+    const protocol = req.protocol; // e.g., 'http' or 'https'
+    const host = req.get('host');  // e.g., 'qrcodeapplication-4ecfc40322a3.herokuapp.com'
+    const url = `${protocol}://${host}/track/${adId}-${locationId}`;  // Unique URL for each ad-location pair
 
     QRCode.toDataURL(url, (err, qrCodeDataUrl) => {
         if (err) {
