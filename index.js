@@ -240,28 +240,27 @@ app.get('/scan/:adId-:locationId', async (req, res) => {
   
 
 
-// Generate QR code for a given ad and location
-app.get('/generate-qr/:adId/:locationId', (req, res) => {
+// Endpoint to generate QR with one-time token
+app.get('/generate-qr/:adId/:locationId', async (req, res) => {
     const { adId, locationId } = req.params;
     if (!isValidParam(adId) || !isValidParam(locationId)) {
         return res.status(400).send('Invalid ad or location ID.');
     }
-    
-    // Dynamically build the URL based on the host
-    const protocol = req.protocol; // e.g., 'http' or 'https'
-    const host = req.get('host');  // e.g., 'qrcodeapplication-4ecfc40322a3.herokuapp.com'
-    const url = `${protocol}://${host}/track/${adId}-${locationId}`;  // Unique URL for each ad-location pair
+
+    const token = generateUniqueToken();  // Generate a unique token
+    const url = `${req.protocol}://${req.get('host')}/track/${adId}-${locationId}?token=${token}`;  // Embed token in the URL
+
+    // Store the token in Redis (expires in 1 hour)
+    redisClient.setex(token, 3600, JSON.stringify({ adId, locationId }));
 
     QRCode.toDataURL(url, (err, qrCodeDataUrl) => {
         if (err) {
             res.status(500).send('Error generating QR code');
             return;
         }
-
         res.send(`<img src="${qrCodeDataUrl}" alt="QR Code">`);
     });
 });
-
 
 
 // Start the server
