@@ -81,9 +81,50 @@ function isValidParam(value) {
   
 
 // Test route
-app.get('/', (req, res) => {
-  res.send('QR Tracking App is running!');
+app.get('/', async (req, res) => {
+    // List of ads with locations
+    const ads = [
+        { adId: 'ad1', locationId: 'california' },
+        { adId: 'ad2', locationId: 'newyork' },
+        { adId: 'ad3', locationId: 'texas' },
+        { adId: 'ad4', locationId: 'florida' }
+    ];
+
+    try {
+        // Generate QR codes for each ad-location pair
+        const qrCodes = await Promise.all(ads.map(async (ad) => {
+            const { adId, locationId } = ad;
+            const url = `${req.protocol}://${req.get('host')}/track/${adId}-${locationId}`; // Generate the tracking URL
+
+            // Generate the QR code for each URL
+            const qrCodeDataUrl = await new Promise((resolve, reject) => {
+                QRCode.toDataURL(url, (err, qrCodeDataUrl) => {
+                    if (err) reject(err);
+                    resolve(qrCodeDataUrl);
+                });
+            });
+
+            return { adId, locationId, qrCodeDataUrl };
+        }));
+
+        // Render a page with all the QR codes
+        let qrCodeHtml = '<h1>QR Codes for Ads</h1>';
+        qrCodes.forEach(qr => {
+            qrCodeHtml += `
+                <div>
+                    <h3>Ad: ${qr.adId} - Location: ${qr.locationId}</h3>
+                    <img src="${qr.qrCodeDataUrl}" alt="QR Code for ${qr.adId} - ${qr.locationId}">
+                </div>
+            `;
+        });
+
+        res.send(qrCodeHtml); // Display all the QR codes
+    } catch (err) {
+        console.error('Error generating QR codes:', err);
+        res.status(500).send('Error generating QR codes.');
+    }
 });
+
 
 // Apply rate limit to your scan tracking route
 app.use('/track', hybridLimiter); // Apply the hybrid rate limiter for both IP and session ID
