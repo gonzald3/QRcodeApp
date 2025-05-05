@@ -84,10 +84,6 @@ app.get('/', (req, res) => {
 app.use('/track', hybridLimiter); // Apply the hybrid rate limiter for both IP and session ID
 app.use('/scans', scanViewLimiter); // Apply the scan view limiter
 
-// Temporary debugging route for /track/:code (GET request)
-app.get('/track/:code', (req, res) => {
-    res.send(`Simulating scan for QR code: ${req.params.code}`);
-});
 
 // QR code tracking route
 app.get('/track/:code', async (req, res) => {
