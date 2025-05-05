@@ -13,6 +13,8 @@ const port = process.env.PORT || 5000;
 
 // Set the trust proxy to handle correct IP forwarding when behind a proxy (like Heroku)
 app.set('trust proxy', 1); // This is important when using Heroku or similar platforms
+const cors = require('cors');
+app.use(cors()); // You can also specify options here if needed
 
 // Rate limit for tracking QR codes (POST /track)
 const limiter = rateLimit({
@@ -95,6 +97,9 @@ app.post('/track/:code', async (req, res) => {
     const ipAddress = req.ip;
     const userAgent = req.get('User-Agent');
 
+    console.log('Session ID:', req.cookies.userSessionId);
+    console.log('Received code:', req.body.code);
+
     if (!userSessionId) {
         // Generate a new session ID for the user if it doesn't exist
         userSessionId = generateUniqueSessionId();
@@ -102,6 +107,7 @@ app.post('/track/:code', async (req, res) => {
         res.cookie('userSessionId', userSessionId, { 
             httpOnly: true,  // Prevent JavaScript access to the cookie (for XSS protection)
             secure: process.env.NODE_ENV === 'production',  // Set the cookie to be secure only in production
+            sameSite: 'None', // for cross-site cookie access
             maxAge: 24 * 60 * 60 * 1000  // 1 day expiry
         });
     }
@@ -124,6 +130,9 @@ app.post('/track/:code', async (req, res) => {
         ipAddress: ipAddress,
         userAgent: userAgent
     });
+
+    console.log('Session ID:', req.cookies.userSessionId);
+    console.log('Received code:', req.body.code);
 
     console.log('Saving scan:', newScan);  // Log scan data before saving
 
@@ -187,12 +196,12 @@ app.get('/scan/:adId-:locationId', (req, res) => {
                         headers: {
                             'Content-Type': 'application/json'
                         },
-                        body: JSON.stringify({ code })
+                        body: JSON.stringify({})  // Empty body, because code is already in the URL
                     });
 
                     if (response.ok) {
                         // Redirect the user after POST
-                        window.location.href = "https://yourdestination.com/success";
+                        window.location.href = "https://yourdestination.com/success";  // Modify with your destination
                     } else {
                         alert("Error tracking QR code scan.");
                     }
@@ -202,6 +211,7 @@ app.get('/scan/:adId-:locationId', (req, res) => {
         </html>
     `);
 });
+
 
 
 // Generate QR code for a given ad and location
