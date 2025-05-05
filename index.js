@@ -64,10 +64,10 @@ mongoose.connect(process.env.MONGODB_URI, {
 
 // Define mock locations
 const locations = {
-    "location1": "Quincy",
-    "location2": "Boston",
-    "location3": "Salem",
-    "location4": "Amherst"
+    "Quincy": "Quincy",
+    "Boston": "Boston",
+    "Salem": "Salem",
+    "Amherst": "Amherst"
 };
 
 // Utility to generate unique session ID
