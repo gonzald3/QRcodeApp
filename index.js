@@ -178,45 +178,29 @@ app.get('/scans', async (req, res) => {
 });
 
 // Serve the redirect page after scanning QR code
-app.get('/scan/:adId-:locationId', (req, res) => {
+// Replace this route
+app.get('/scan/:adId-:locationId', async (req, res) => {
     const { adId, locationId } = req.params;
     const code = `${adId}-${locationId}`;
-    
-    res.send(`
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Scan Redirect</title>
-        </head>
-        <body>
-            <h1>Thank you for scanning the QR Code!</h1>
-            <script>
-                // Automatically send POST request after page loads
-                window.onload = async () => {
-                    const code = "${code}"; // Dynamically set the code
-                    const response = await fetch('/track/' + code, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({})  // Empty body, because code is already in the URL
-                    });
-
-                    if (response.ok) {
-                        // Redirect the user after POST
-                        window.location.href = "https://yourdestination.com/success";  // Modify with your destination
-                    } else {
-                        alert("Error tracking QR code scan.");
-                    }
-                };
-            </script>
-        </body>
-        </html>
-    `);
-});
-
+  
+    try {
+      await Scan.create({
+        code,
+        adId,
+        locationId,
+        locationName: getLocationName(locationId), // Replace with your own logic or a lookup
+        timestamp: new Date(),
+        ip: req.ip,
+        userAgent: req.get('User-Agent')
+      });
+  
+      res.redirect('https://yourdestination.com/success'); // Customize as needed
+    } catch (err) {
+      console.error('Error recording scan:', err);
+      res.status(500).send('Error tracking QR scan.');
+    }
+  });
+  
 
 
 // Generate QR code for a given ad and location
