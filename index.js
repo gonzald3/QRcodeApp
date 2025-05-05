@@ -86,6 +86,8 @@ app.get('/track/:code', (req, res) => {
 
 // QR code tracking route
 app.post('/track/:code', async (req, res) => {
+    console.log('Tracking QR code scan...'); // This log is for debugging
+
     const { code } = req.params;
     const [adId, locationId] = code.split('-'); // Split the code to get ad and location IDs
     const locationName = locations[locationId]; // Get the location name from the mapping
@@ -108,6 +110,7 @@ app.post('/track/:code', async (req, res) => {
     const existingScan = await Scan.findOne({ code: code, userSessionId: userSessionId });
 
     if (existingScan) {
+        console.log('Scan already exists for this session'); // Log if the scan already exists
         return res.status(200).send('You have already scanned this QR code.');
     }
 
@@ -122,18 +125,21 @@ app.post('/track/:code', async (req, res) => {
         userAgent: userAgent
     });
 
+    console.log('Saving scan:', newScan);  // Log scan data before saving
+
     try {
         // Save the scan record to MongoDB
         await newScan.save();
-        console.log('Scan logged:', newScan);  // Logs the scan data
-
+        console.log('Scan logged successfully:', newScan); // Log successful save
         // Redirect user to a URL (can be customized based on the code)
         res.redirect(`https://yourdestination.com/${adId}-${locationId}`);
     } catch (error) {
-        console.error('Error saving scan to database:', error); // Log any errors
+        console.error('Error saving scan to database:', error);
         res.status(500).send('Error tracking QR code scan.');
     }
 });
+
+
 
 // View all scan logs (GET /scans)
 app.get('/scans', async (req, res) => {
