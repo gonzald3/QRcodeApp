@@ -54,8 +54,7 @@ app.use(express.json());
 // Connect to MongoDB
 mongoose.connect(process.env.MONGODB_URI, {
     dbName: 'qrtrack',  // <-- explicitly sets the database name
-    useNewUrlParser: true,
-    useUnifiedTopology: true
+
 })
   .then(() => console.log("MongoDB connected to 'qrtrack' database"))
   .catch(err => {
@@ -91,65 +90,50 @@ app.get('/track/:code', (req, res) => {
 });
 
 // QR code tracking route
-app.post('/track/:code', async (req, res) => {
-    console.log('Tracking QR code scan...'); // This log is for debugging
+app.get('/track/:code', async (req, res) => {
+    console.log("Tracking QR code via GET /track/:code");
 
     const { code } = req.params;
-    const [adId, locationId] = code.split('-'); // Split the code to get ad and location IDs
-    const locationName = locations[locationId]; // Get the location name from the mapping
-    let userSessionId = req.cookies.userSessionId; // Track via session ID stored in a cookie
+    const [adId, locationId] = code.split('-');
+    const locationName = locations[locationId];
+    let userSessionId = req.cookies.userSessionId;
     const ipAddress = req.ip;
     const userAgent = req.get('User-Agent');
 
-    console.log('Session ID:', req.cookies.userSessionId);
-    console.log('Received code:', req.body.code);
-    console.log("POST /track hit!")
-
     if (!userSessionId) {
-        // Generate a new session ID for the user if it doesn't exist
         userSessionId = generateUniqueSessionId();
-        // Set the cookie for 1 day expiry, with secure flag for production environment
-        res.cookie('userSessionId', userSessionId, { 
-            httpOnly: true,  // Prevent JavaScript access to the cookie (for XSS protection)
-            secure: process.env.NODE_ENV === 'production',  // Set the cookie to be secure only in production
-            sameSite: 'None', // for cross-site cookie access
-            maxAge: 24 * 60 * 60 * 1000  // 1 day expiry
+        res.cookie('userSessionId', userSessionId, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'None',
+            maxAge: 24 * 60 * 60 * 1000
         });
     }
 
-    // Check if the session ID and code combination already exists in the database
     const existingScan = await Scan.findOne({ code: code, userSessionId: userSessionId });
 
     if (existingScan) {
-        console.log('Scan already exists for this session'); // Log if the scan already exists
-        return res.status(200).send('You have already scanned this QR code.');
+        console.log('Already scanned by this session');
+        return res.redirect('https://yourdestination.com/already-scanned'); // optional: create a different page
     }
 
-    // Create a new scan record with ad and location information
-    const newScan = new Scan({
-        code: code,         // This now contains the adId-locationId
-        adId: adId,         // Store the adId separately
-        locationId: locationId,  // Store the locationId separately
-        locationName: locationName, // Store the location name
-        userSessionId: userSessionId,
-        ipAddress: ipAddress,
-        userAgent: userAgent
-    });
-
-    console.log('Session ID:', req.cookies.userSessionId);
-    console.log('Received code:', req.body.code);
-
-    console.log('Saving scan:', newScan);  // Log scan data before saving
-
     try {
-        // Save the scan record to MongoDB
+        const newScan = new Scan({
+            code,
+            adId,
+            locationId,
+            locationName,
+            userSessionId,
+            ipAddress,
+            userAgent
+        });
+
         await newScan.save();
-        console.log('Scan logged successfully:', newScan); // Log successful save
-        // Redirect user to a URL (can be customized based on the code)
-        res.redirect(`/scan`);
-    } catch (error) {
-        console.error('Error saving scan to database:', error);
-        res.status(500).send('Error tracking QR code scan.');
+        console.log('Scan saved:', newScan);
+        return res.redirect('https://yourdestination.com/success'); // Customize this URL
+    } catch (err) {
+        console.error('Error saving scan:', err);
+        return res.status(500).send('Error tracking QR code scan.');
     }
 });
 
