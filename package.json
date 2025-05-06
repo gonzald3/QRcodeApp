@@ -1,15 +1,17 @@
 {
   "name": "tracker",
   "version": "1.0.0",
+  "description": "QR code tracker app",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node index.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "engines": {
+    "node": "18.x"
+  },
   "dependencies": {
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
@@ -19,7 +21,6 @@
     "joi": "^17.13.3",
     "moment": "^2.30.1",
     "mongoose": "^8.14.1",
-    "qrcode": "^1.5.4",
-    "redis": "^5.0.1"
+    "qrcode": "^1.5.4"
   }
 }

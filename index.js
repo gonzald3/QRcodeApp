@@ -9,60 +9,35 @@ const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
 
 const port = process.env.PORT || 5000;
+const TOKEN_SECRET = process.env.TOKEN_SECRET || 'yoursecretkey'; // Add to .env
 
-
-// Set the trust proxy to handle correct IP forwarding when behind a proxy (like Heroku)
-app.set('trust proxy', 1); // This is important when using Heroku or similar platforms
+app.set('trust proxy', 1);
 const cors = require('cors');
 const corsOptions = {
-    origin: ['https://yourfrontend.com', 'https://qrcodeapplication-4ecfc40322a3.herokuapp.com'], // add all expected domains
+    origin: ['https://yourfrontend.com', 'https://qrcodeapplication-4ecfc40322a3.herokuapp.com'],
     credentials: true
 };
 app.use(cors(corsOptions));
 
-// Rate limit for tracking QR codes (POST /track)
-const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 40, // Limit each IP to 40 requests per windowMs
-    message: "Too many requests from this IP, please try again after 15 minutes"
-});
-
-// Rate limit for viewing scans (GET /scans)
-const scanViewLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 50, // Allow only 50 requests per 15 minutes for scan logs
-    message: "Too many requests to view scan logs, please try again later",
-});
-
-// Rate limiter for both IP and session ID (hybrid limiter)
+// Rate limiters
+const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 40, message: "Too many requests." });
+const scanViewLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 50, message: "Too many requests." });
 const hybridLimiter = rateLimit({
-    keyGenerator: (req) => {
-        return req.ip + req.cookies.userSessionId; // Combines IP and session ID
-    },
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100, // Allow 100 requests per 15 minutes for each IP-session pair
+    keyGenerator: (req) => req.ip + req.cookies.userSessionId,
+    windowMs: 15 * 60 * 1000,
+    max: 100,
     message: "Too many requests, please try again later",
 });
 
-// Import the Scan model
-const Scan = require('./models/Scan'); // Make sure this path is correct
-
-// Middleware setup
+// Models & middleware
+const Scan = require('./models/Scan');
 app.use(cookieParser());
 app.use(express.json());
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI, {
-    dbName: 'qrtrack',  // <-- explicitly sets the database name
+mongoose.connect(process.env.MONGODB_URI, { dbName: 'qrtrack' })
+  .then(() => console.log("MongoDB connected"))
+  .catch(err => { console.error("MongoDB error:", err); process.exit(1); });
 
-})
-  .then(() => console.log("MongoDB connected to 'qrtrack' database"))
-  .catch(err => {
-    console.error("MongoDB connection error:", err);
-    process.exit(1);
-  });
-
-// Define mock locations
 const locations = {
     "Quincy": "Quincy",
     "Boston": "Boston",
@@ -70,19 +45,33 @@ const locations = {
     "Amherst": "Amherst"
 };
 
-// Utility to generate unique session ID
+// Utils
 function generateUniqueSessionId() {
     return crypto.randomBytes(16).toString('hex');
 }
 
 function isValidParam(value) {
-    return /^[a-zA-Z0-9\-]+$/.test(value); // Alphanumeric and hyphens only
-  }
-  
+    return /^[a-zA-Z0-9\-]+$/.test(value);
+}
 
-// Test route
+function generateSignedToken(adId, locationId) {
+    const data = `${adId}:${locationId}`;
+    const hash = crypto.createHmac('sha256', TOKEN_SECRET).update(data).digest('hex');
+    return `${adId}-${locationId}-${hash}`;
+}
+
+function verifySignedToken(token) {
+    const parts = token.split('-');
+    if (parts.length < 3) return null;
+    const hash = parts.pop();
+    const locationId = parts.pop();
+    const adId = parts.join('-');
+    const expected = crypto.createHmac('sha256', TOKEN_SECRET).update(`${adId}:${locationId}`).digest('hex');
+    return (expected === hash) ? { adId, locationId } : null;
+}
+
+// Home page with test QR codes
 app.get('/', async (req, res) => {
-    // List of ads with locations
     const ads = [
         { adId: 'ad1', locationId: 'california' },
         { adId: 'ad2', locationId: 'newyork' },
@@ -91,23 +80,13 @@ app.get('/', async (req, res) => {
     ];
 
     try {
-        // Generate QR codes for each ad-location pair
-        const qrCodes = await Promise.all(ads.map(async (ad) => {
-            const { adId, locationId } = ad;
-            const url = `${req.protocol}://${req.get('host')}/track/${adId}-${locationId}`; // Generate the tracking URL
-
-            // Generate the QR code for each URL
-            const qrCodeDataUrl = await new Promise((resolve, reject) => {
-                QRCode.toDataURL(url, (err, qrCodeDataUrl) => {
-                    if (err) reject(err);
-                    resolve(qrCodeDataUrl);
-                });
-            });
-
+        const qrCodes = await Promise.all(ads.map(async ({ adId, locationId }) => {
+            const token = generateSignedToken(adId, locationId);
+            const url = `${req.protocol}://${req.get('host')}/track/${token}`;
+            const qrCodeDataUrl = await QRCode.toDataURL(url);
             return { adId, locationId, qrCodeDataUrl };
         }));
 
-        // Render a page with all the QR codes
         let qrCodeHtml = '<h1>QR Codes for Ads</h1>';
         qrCodes.forEach(qr => {
             qrCodeHtml += `
@@ -118,33 +97,24 @@ app.get('/', async (req, res) => {
             `;
         });
 
-        res.send(qrCodeHtml); // Display all the QR codes
+        res.send(qrCodeHtml);
     } catch (err) {
-        console.error('Error generating QR codes:', err);
+        console.error('QR error:', err);
         res.status(500).send('Error generating QR codes.');
     }
 });
 
+// Rate limiters
+app.use('/track', hybridLimiter);
+app.use('/scans', scanViewLimiter);
 
-// Apply rate limit to your scan tracking route
-app.use('/track', hybridLimiter); // Apply the hybrid rate limiter for both IP and session ID
-app.use('/scans', scanViewLimiter); // Apply the scan view limiter
+// QR scan tracking
+app.get('/track/:token', async (req, res) => {
+    const tokenData = verifySignedToken(req.params.token);
+    if (!tokenData) return res.status(400).send('Invalid QR code');
 
-
-// QR code tracking route
-app.get('/track/:code', async (req, res) => {
-    console.log("Tracking QR code via GET /track/:code");
-
-    const { code } = req.params;
-    if (!isValidParam(code)) {
-        return res.status(400).send('Invalid code format.');
-    }
-
-
-    const [adId, locationId] = code.split('-');
-    if (!isValidParam(adId) || !isValidParam(locationId)) {
-        return res.status(400).send('Invalid ad or location ID.');
-    }
+    const { adId, locationId } = tokenData;
+    const code = `${adId}-${locationId}`;
     const locationName = locations[locationId];
     let userSessionId = req.cookies.userSessionId;
     const ipAddress = req.ip;
@@ -160,15 +130,13 @@ app.get('/track/:code', async (req, res) => {
         });
     }
 
-    const existingScan = await Scan.findOne({ code: code, userSessionId: userSessionId });
-
+    const existingScan = await Scan.findOne({ code, userSessionId });
     if (existingScan) {
-        console.log('Already scanned by this session');
-        return res.redirect('https://yourdestination.com/already-scanned'); // optional: create a different page
+        return res.redirect('https://yourdestination.com/already-scanned');
     }
 
     try {
-        const newScan = new Scan({
+        await Scan.create({
             code,
             adId,
             locationId,
@@ -177,93 +145,47 @@ app.get('/track/:code', async (req, res) => {
             ipAddress,
             userAgent
         });
-
-        await newScan.save();
-        console.log('Scan saved:', newScan);
-        return res.redirect('https://yourdestination.com/success'); // Customize this URL
+        return res.redirect('https://yourdestination.com/success');
     } catch (err) {
-        console.error('Error saving scan:', err);
-        return res.status(500).send('Error tracking QR code scan.');
+        console.error('Scan save error:', err);
+        return res.status(500).send('Tracking error.');
     }
 });
 
-
-
-// View all scan logs (GET /scans)
+// View all scans
 app.get('/scans', async (req, res) => {
     try {
-        const scans = await Scan.find().sort({ timestamp: -1 }); // Newest first
-
-        // Map the scans to a more readable format
-        const formattedScans = scans.map(scan => ({
+        const scans = await Scan.find().sort({ timestamp: -1 });
+        res.json(scans.map(scan => ({
             _id: scan._id,
             code: scan.code,
             adId: scan.adId,
             locationId: scan.locationId,
-            locationName: scan.locationName, // Include the location name
-            timestamp: scan.timestamp.toLocaleString(), // More readable date format
-        }));
-
-        res.json(formattedScans);
+            locationName: scan.locationName,
+            timestamp: scan.timestamp.toLocaleString(),
+        })));
     } catch (err) {
-        console.error('Error fetching scans:', err);
-        res.status(500).send('Error retrieving scans.');
+        console.error('Scan fetch error:', err);
+        res.status(500).send('Failed to load scans.');
     }
 });
 
-// Serve the redirect page after scanning QR code
-// Replace this route
-app.get('/scan/:adId-:locationId', async (req, res) => {
-    const { adId, locationId } = req.params;
-    if (!isValidParam(adId) || !isValidParam(locationId)) {
-        return res.status(400).send('Invalid ad or location ID.');
-    }
-    const code = `${adId}-${locationId}`;
-  
-    try {
-      await Scan.create({
-        code,
-        adId,
-        locationId,
-        locationName: getLocationName(locationId), // Replace with your own logic or a lookup
-        timestamp: new Date(),
-        ip: req.ip,
-        userAgent: req.get('User-Agent')
-      });
-  
-      res.redirect('https://yourdestination.com/success'); // Customize as needed
-    } catch (err) {
-      console.error('Error recording scan:', err);
-      res.status(500).send('Error tracking QR scan.');
-    }
-  });
-  
-
-
-// Endpoint to generate QR with one-time token
+// Generate individual QR with secure token
 app.get('/generate-qr/:adId/:locationId', async (req, res) => {
     const { adId, locationId } = req.params;
     if (!isValidParam(adId) || !isValidParam(locationId)) {
-        return res.status(400).send('Invalid ad or location ID.');
+        return res.status(400).send('Invalid input.');
     }
 
-    const token = generateUniqueToken();  // Generate a unique token
-    const url = `${req.protocol}://${req.get('host')}/track/${adId}-${locationId}?token=${token}`;  // Embed token in the URL
-
-    // Store the token in Redis (expires in 1 hour)
-    redisClient.setex(token, 3600, JSON.stringify({ adId, locationId }));
+    const token = generateSignedToken(adId, locationId);
+    const url = `${req.protocol}://${req.get('host')}/track/${token}`;
 
     QRCode.toDataURL(url, (err, qrCodeDataUrl) => {
-        if (err) {
-            res.status(500).send('Error generating QR code');
-            return;
-        }
+        if (err) return res.status(500).send('QR generation failed');
         res.send(`<img src="${qrCodeDataUrl}" alt="QR Code">`);
     });
 });
 
-
-// Start the server
 app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+    console.log(`Server running on port ${port}`);
 });
