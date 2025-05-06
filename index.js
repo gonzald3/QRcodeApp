@@ -157,30 +157,67 @@ app.get('/scans', async (req, res) => {
     try {
         const scans = await Scan.find().sort({ timestamp: -1 });
 
+        // Analytics
+        const totalScans = scans.length;
+        const uniqueSessions = new Set(scans.map(scan => scan.userSessionId)).size;
+
+        // Scans by location and ad
+        const scansByLocation = {};
+        const scansByAd = {};
+        let firstScanTime = scans[scans.length - 1]?.timestamp;
+        let lastScanTime = scans[0]?.timestamp;
+
+        scans.forEach(scan => {
+            scansByLocation[scan.locationId] = (scansByLocation[scan.locationId] || 0) + 1;
+            scansByAd[scan.adId] = (scansByAd[scan.adId] || 0) + 1;
+        });
+
+        // HTML header and analytics summary
         let html = `
-            <html>
-            <head>
-                <title>QR Scan Logs</title>
-                <style>
-                    body { font-family: Arial, sans-serif; padding: 20px; background: #f8f8f8; }
-                    table { border-collapse: collapse; width: 100%; background: #fff; }
-                    th, td { padding: 10px; border: 1px solid #ccc; text-align: left; }
-                    th { background: #333; color: white; }
-                    tr:nth-child(even) { background-color: #f2f2f2; }
-                </style>
-            </head>
-            <body>
-                <h1>QR Code Scan Logs</h1>
-                <table>
-                    <tr>
-                        <th>Ad ID</th>
-                        <th>Location ID</th>
-                        <th>Location Name</th>
-                        <th>Code</th>
-                        <th>Timestamp</th>
-                    </tr>
+        <html>
+        <head>
+            <title>QR Scan Analytics</title>
+            <style>
+                body { font-family: Arial, sans-serif; padding: 20px; background: #f8f8f8; }
+                h1 { margin-bottom: 5px; }
+                h2 { margin-top: 40px; }
+                .stats { background: #fff; padding: 20px; margin-bottom: 20px; border: 1px solid #ddd; }
+                .stats p { margin: 5px 0; }
+                table { border-collapse: collapse; width: 100%; background: #fff; }
+                th, td { padding: 10px; border: 1px solid #ccc; text-align: left; }
+                th { background: #333; color: white; }
+                tr:nth-child(even) { background-color: #f2f2f2; }
+                ul { margin: 0; padding-left: 20px; }
+            </style>
+        </head>
+        <body>
+            <h1>QR Code Scan Analytics</h1>
+            <div class="stats">
+                <p><strong>Total Scans:</strong> ${totalScans}</p>
+                <p><strong>Unique Sessions:</strong> ${uniqueSessions}</p>
+                <p><strong>Time Range:</strong> ${firstScanTime?.toLocaleString()} to ${lastScanTime?.toLocaleString()}</p>
+                <p><strong>Scans by Location:</strong></p>
+                <ul>
+                    ${Object.entries(scansByLocation).map(([loc, count]) => `<li>${loc}: ${count}</li>`).join('')}
+                </ul>
+                <p><strong>Scans by Ad:</strong></p>
+                <ul>
+                    ${Object.entries(scansByAd).map(([ad, count]) => `<li>${ad}: ${count}</li>`).join('')}
+                </ul>
+            </div>
+
+            <h2>Detailed Scan Logs</h2>
+            <table>
+                <tr>
+                    <th>Ad ID</th>
+                    <th>Location ID</th>
+                    <th>Location Name</th>
+                    <th>Code</th>
+                    <th>Timestamp</th>
+                </tr>
         `;
 
+        // Add table rows
         scans.forEach(scan => {
             html += `
                 <tr>
@@ -194,17 +231,18 @@ app.get('/scans', async (req, res) => {
         });
 
         html += `
-                </table>
-            </body>
-            </html>
+            </table>
+        </body>
+        </html>
         `;
 
         res.send(html);
     } catch (err) {
-        console.error('Scan fetch error:', err);
-        res.status(500).send('Failed to load scans.');
+        console.error('Scan analytics error:', err);
+        res.status(500).send('Failed to load analytics.');
     }
 });
+
 
 
 // Generate individual QR with secure token
