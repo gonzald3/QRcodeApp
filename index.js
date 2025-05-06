@@ -156,19 +156,56 @@ app.get('/track/:token', async (req, res) => {
 app.get('/scans', async (req, res) => {
     try {
         const scans = await Scan.find().sort({ timestamp: -1 });
-        res.json(scans.map(scan => ({
-            _id: scan._id,
-            code: scan.code,
-            adId: scan.adId,
-            locationId: scan.locationId,
-            locationName: scan.locationName,
-            timestamp: scan.timestamp.toLocaleString(),
-        })));
+
+        let html = `
+            <html>
+            <head>
+                <title>QR Scan Logs</title>
+                <style>
+                    body { font-family: Arial, sans-serif; padding: 20px; background: #f8f8f8; }
+                    table { border-collapse: collapse; width: 100%; background: #fff; }
+                    th, td { padding: 10px; border: 1px solid #ccc; text-align: left; }
+                    th { background: #333; color: white; }
+                    tr:nth-child(even) { background-color: #f2f2f2; }
+                </style>
+            </head>
+            <body>
+                <h1>QR Code Scan Logs</h1>
+                <table>
+                    <tr>
+                        <th>Ad ID</th>
+                        <th>Location ID</th>
+                        <th>Location Name</th>
+                        <th>Code</th>
+                        <th>Timestamp</th>
+                    </tr>
+        `;
+
+        scans.forEach(scan => {
+            html += `
+                <tr>
+                    <td>${scan.adId}</td>
+                    <td>${scan.locationId}</td>
+                    <td>${scan.locationName || '-'}</td>
+                    <td>${scan.code}</td>
+                    <td>${scan.timestamp.toLocaleString()}</td>
+                </tr>
+            `;
+        });
+
+        html += `
+                </table>
+            </body>
+            </html>
+        `;
+
+        res.send(html);
     } catch (err) {
         console.error('Scan fetch error:', err);
         res.status(500).send('Failed to load scans.');
     }
 });
+
 
 // Generate individual QR with secure token
 app.get('/generate-qr/:adId/:locationId', async (req, res) => {
