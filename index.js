@@ -89,7 +89,8 @@ app.get('/', requireBasicAuth, async (req, res) => {
         const qrCodes = await Promise.all(ads.map(async ({ adId, name }) => {
             return Promise.all(locations.map(async ({ locationId, name: locationName }) => {
                 const token = generateSignedToken(adId, locationId);
-                const url = `${req.protocol}://${req.get('host')}/track/${token}`;
+                const baseUrl = process.env.BASE_URL || 'https://qrcodeapplication-4ecfc40322a3.herokuapp.com';
+                const url = `${baseUrl}/track/${token}`;
                 const qrCodeDataUrl = await QRCode.toDataURL(url);
                 return { adId, locationId, locationName, qrCodeDataUrl };
             }));
