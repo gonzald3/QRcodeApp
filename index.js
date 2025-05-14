@@ -61,17 +61,10 @@ function isValidParam(value) {
     return /^[a-zA-Z0-9\-]+$/.test(value);
 }
 
-function sanitizeId(id) {
-    // Replace spaces with dashes and remove non-alphanumeric characters except for dashes
-    return id.replace(/[^a-zA-Z0-9\-]/g, '-');
-}
-
 function generateSignedToken(adId, locationId) {
-    const sanitizedAdId = sanitizeId(adId);  // Sanitize the adId
-    const sanitizedLocationId = sanitizeId(locationId);  // Sanitize the locationId
-    const data = `${sanitizedAdId}:${sanitizedLocationId}`;  // Use sanitized IDs
+    const data = `${adId}:${locationId}`;
     const hash = crypto.createHmac('sha256', TOKEN_SECRET).update(data).digest('hex');
-    return `${sanitizedAdId}-${sanitizedLocationId}-${hash}`;  // Return the signed token
+    return `${adId}-${locationId}-${hash}`;
 }
 
 function verifySignedToken(token) {
@@ -95,7 +88,7 @@ app.get('/', requireBasicAuth, async (req, res) => {
         // Generate QR codes for each ad-location pair
         const qrCodes = await Promise.all(ads.map(async ({ adId, name }) => {
             return Promise.all(locations.map(async ({ locationId, name: locationName }) => {
-                const token = generateSignedToken(adId, locationId);  // Using sanitized IDs
+                const token = generateSignedToken(adId, locationId);
                 const baseUrl = process.env.BASE_URL || 'https://qrcodeapplication-4ecfc40322a3.herokuapp.com';
                 const url = `${baseUrl}/track/${token}`;
                 const qrCodeDataUrl = await QRCode.toDataURL(encodeURI(url));
@@ -105,7 +98,7 @@ app.get('/', requireBasicAuth, async (req, res) => {
 
         // Flatten the array of QR codes
         const qrCodeHtml = qrCodes.flat().map(qr => {
-            const token = generateSignedToken(qr.adId, qr.locationId);  // Using sanitized IDs
+            const token = generateSignedToken(qr.adId, qr.locationId);
             const baseUrl = process.env.BASE_URL || 'https://qrcodeapplication-4ecfc40322a3.herokuapp.com';
             const url = `${baseUrl}/track/${token}`;
         
@@ -181,14 +174,15 @@ app.use('/scans', scanViewLimiter);
 
 // QR scan tracking
 app.get('/track/:token', async (req, res) => {
-    const tokenData = verifySignedToken(req.params.token);  // This function verifies the sanitized token
+    const tokenData = verifySignedToken(req.params.token);
     if (!tokenData) return res.status(400).send('Invalid QR code');
 
     const { adId, locationId } = tokenData;
     const locationName = await Location.findOne({ locationId }).select('name');
     if (!locationName) return res.status(400).send('Invalid location');
 
-    // Generate a session cookie
+    
+    //generate a session cookie
     let userSessionId = req.cookies.userSessionId;
 
     if (!userSessionId) {
@@ -201,27 +195,15 @@ app.get('/track/:token', async (req, res) => {
         });
     }
 
+
     const ipAddress = req.ip;
     const userAgent = req.get('User-Agent');
 
-    // Check for duplicate scan within 24 hours for same userSessionId, IP, and userAgent
-    const existingScan = await Scan.findOne({
-        code: `${adId}-${locationId}`,
-        $or: [
-            { userSessionId },
-            { ipAddress, userAgent }
-        ],
-        timestamp: { $gt: Date.now() - 24 * 60 * 60 * 1000 } // Only allow one scan per 24 hours
-    });
-
-    // If a duplicate scan is found, redirect
-    if (existingScan) {
-        console.log('Duplicate scan detected:', { adId, locationId, userSessionId, ipAddress, userAgent });
-        return res.redirect('https://yourdestination.com/already-scanned');
-    }
-
-    // Save the scan
+    // Save scan to the database
     try {
+        const existingScan = await Scan.findOne({ code: `${adId}-${locationId}`, userSessionId });
+        if (existingScan) return res.redirect('https://yourdestination.com/already-scanned');
+
         await Scan.create({
             code: `${adId}-${locationId}`,
             adId,
@@ -237,8 +219,6 @@ app.get('/track/:token', async (req, res) => {
         res.status(500).send('Tracking error.');
     }
 });
-
-
 
 
 // View all scans
