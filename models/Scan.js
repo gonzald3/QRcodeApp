@@ -4,7 +4,6 @@ const scanSchema = new mongoose.Schema({
     code: {
         type: String,
         required: true,
-        unique: true, // Ensures no duplicate scans for the same QR code per session
     },
     adId: String,
     locationId: String,
@@ -22,5 +21,9 @@ const scanSchema = new mongoose.Schema({
 scanSchema.index({ adId: 1 });
 scanSchema.index({ locationId: 1 });
 scanSchema.index({ userSessionId: 1 });
+// ✅ Compound unique index to prevent duplicate scans per user per code
+scanSchema.index({ code: 1, userSessionId: 1 }, { unique: true });
+scanSchema.index({ timestamp: 1 }, { expireAfterSeconds: 60 * 60 * 24 * 30 }); // 30 days
+
 
 module.exports = mongoose.model('Scan', scanSchema);
