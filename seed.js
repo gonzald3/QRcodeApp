@@ -9,9 +9,12 @@ mongoose.connect(process.env.MONGODB_URI, { dbName: 'qrtrack' })
     .then(async () => {
         // Insert initial ads
         await Ad.insertMany([
-            { adId: 'fight-back', name: 'Fight Back' },
-            { adId: 'pro-working', name: 'Pro Working' },
-            { adId: 'tax-cut', name: 'Tax Cut' }
+            { adId: 'fight-back-poster', name: 'Fight Back Poster' },
+            { adId: 'pro-working-class-anti-war', name: 'Pro Working Class AntiWar' },
+            { adId: 'rebel-girl-poster', name: 'Rebel Girl Poster' },
+            { adId: 'free-the-world-poster', name: 'Free the World Poster' },
+            { adId: 'revolutionary-poster', name: 'Revolutionary Poster' },
+            { adId: 'freedom-fighter-poster', name: 'Freedom Fighter Poster' }
         ]);
 
         // Insert initial locations

@@ -211,7 +211,7 @@ app.get('/track/:token', async (req, res) => {
     // If a duplicate scan is found, redirect
     if (existingScan) {
         console.log('Duplicate scan detected:', { adId, locationId, userSessionId, ipAddress, userAgent });
-        return res.redirect('https://yourdestination.com/already-scanned');
+        return res.redirect('https://acp.us');
     }
 
     // Save the scan
@@ -225,7 +225,7 @@ app.get('/track/:token', async (req, res) => {
             ipAddress,
             userAgent
         });
-        res.redirect('https://yourdestination.com/success');
+        res.redirect('https://acp.us');
     } catch (err) {
         console.error('Scan save error:', err);
         res.status(500).send('Tracking error.');
