@@ -7,11 +7,23 @@ const moment = require('moment');
 const rateLimit = require('express-rate-limit');
 const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
+const Ad = require('./models/Ad');  // Import the Ad model
+const Location = require('./models/Location');  // Import the Location model
+const basicAuth = require('express-basic-auth'); // for password username
 
 const port = process.env.PORT || 5000;
 const TOKEN_SECRET = process.env.TOKEN_SECRET || 'yoursecretkey'; // Add to .env
 
+
+// Apply basic authentication to the homepage route (`/`)
+app.use('/', basicAuth({
+    users: { [process.env.BASIC_AUTH_USER]: process.env.BASIC_AUTH_PASSWORD },
+    challenge: true,
+    realm: 'QR Code Authentication'
+  }));
+
 app.set('trust proxy', 1);
+
 const cors = require('cors');
 const corsOptions = {
     origin: ['https://yourfrontend.com', 'https://qrcodeapplication-4ecfc40322a3.herokuapp.com'],
@@ -38,12 +50,7 @@ mongoose.connect(process.env.MONGODB_URI, { dbName: 'qrtrack' })
   .then(() => console.log("MongoDB connected"))
   .catch(err => { console.error("MongoDB error:", err); process.exit(1); });
 
-const locations = {
-    "Quincy": "Quincy",
-    "Boston": "Boston",
-    "Salem": "Salem",
-    "Amherst": "Amherst"
-};
+
 
 // Utils
 function generateUniqueSessionId() {
@@ -70,39 +77,87 @@ function verifySignedToken(token) {
     return (expected === hash) ? { adId, locationId } : null;
 }
 
+
 // Home page with test QR codes
 app.get('/', async (req, res) => {
-    const ads = [
-        { adId: 'ad1', locationId: 'california' },
-        { adId: 'ad2', locationId: 'newyork' },
-        { adId: 'ad3', locationId: 'texas' },
-        { adId: 'ad4', locationId: 'florida' }
-    ];
-
     try {
-        const qrCodes = await Promise.all(ads.map(async ({ adId, locationId }) => {
-            const token = generateSignedToken(adId, locationId);
-            const url = `${req.protocol}://${req.get('host')}/track/${token}`;
-            const qrCodeDataUrl = await QRCode.toDataURL(url);
-            return { adId, locationId, qrCodeDataUrl };
+        // Fetch ads and locations from the database
+        const ads = await Ad.find();
+        const locations = await Location.find();
+
+        // Generate QR codes for each ad-location pair
+        const qrCodes = await Promise.all(ads.map(async ({ adId, name }) => {
+            return Promise.all(locations.map(async ({ locationId, name: locationName }) => {
+                const token = generateSignedToken(adId, locationId);
+                const url = `${req.protocol}://${req.get('host')}/track/${token}`;
+                const qrCodeDataUrl = await QRCode.toDataURL(url);
+                return { adId, locationId, locationName, qrCodeDataUrl };
+            }));
         }));
 
-        let qrCodeHtml = '<h1>QR Codes for Ads</h1>';
-        qrCodes.forEach(qr => {
-            qrCodeHtml += `
-                <div>
-                    <h3>Ad: ${qr.adId} - Location: ${qr.locationId}</h3>
-                    <img src="${qr.qrCodeDataUrl}" alt="QR Code for ${qr.adId} - ${qr.locationId}">
-                </div>
-            `;
-        });
+        // Flatten the array of QR codes
+        const qrCodeHtml = qrCodes.flat().map(qr => `
+            <div class="qr-item">
+                <h3>${qr.adId} - ${qr.locationName}</h3>
+                <img src="${qr.qrCodeDataUrl}" alt="QR Code for ${qr.adId} - ${qr.locationName}">
+            </div>
+        `).join('');
 
-        res.send(qrCodeHtml);
+        // Send the HTML response with inline styles
+        res.send(`
+            <html>
+                <head>
+                    <title>QR Codes for Ads</title>
+                    <style>
+                        body {
+                            font-family: Arial, sans-serif;
+                            display: flex;
+                            flex-wrap: wrap;
+                            justify-content: space-between;
+                            padding: 20px;
+                        }
+                        .qr-container {
+                            display: flex;
+                            flex-wrap: wrap;
+                            justify-content: space-between;
+                        }
+                        .qr-item {
+                            text-align: center;
+                            border: 1px solid #ddd;
+                            border-radius: 8px;
+                            padding: 8px;
+                            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                            background-color: #fff;
+                            width: 180px;
+                            margin: 10px;
+                        }
+                        .qr-item img {
+                            max-width: 100%;
+                            height: auto;
+                            border-radius: 4px;
+                        }
+                        .qr-item h3 {
+                            font-size: 1rem;
+                            margin-top: 8px;
+                            font-weight: bold;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <h1>QR Codes for Ads</h1>
+                    <div class="qr-container">
+                        ${qrCodeHtml}
+                    </div>
+                </body>
+            </html>
+        `);
     } catch (err) {
         console.error('QR error:', err);
         res.status(500).send('Error generating QR codes.');
     }
 });
+
+
 
 // Rate limiters
 app.use('/track', hybridLimiter);
@@ -114,134 +169,111 @@ app.get('/track/:token', async (req, res) => {
     if (!tokenData) return res.status(400).send('Invalid QR code');
 
     const { adId, locationId } = tokenData;
-    const code = `${adId}-${locationId}`;
-    const locationName = locations[locationId];
-    let userSessionId = req.cookies.userSessionId;
+    const locationName = await Location.findOne({ locationId }).select('name');
+    if (!locationName) return res.status(400).send('Invalid location');
+
+    const userSessionId = req.cookies.userSessionId || generateUniqueSessionId();
     const ipAddress = req.ip;
     const userAgent = req.get('User-Agent');
 
-    if (!userSessionId) {
-        userSessionId = generateUniqueSessionId();
-        res.cookie('userSessionId', userSessionId, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'None',
-            maxAge: 24 * 60 * 60 * 1000
-        });
-    }
-
-    const existingScan = await Scan.findOne({ code, userSessionId });
-    if (existingScan) {
-        return res.redirect('https://yourdestination.com/already-scanned');
-    }
-
+    // Save scan to the database
     try {
+        const existingScan = await Scan.findOne({ code: `${adId}-${locationId}`, userSessionId });
+        if (existingScan) return res.redirect('https://yourdestination.com/already-scanned');
+
         await Scan.create({
-            code,
+            code: `${adId}-${locationId}`,
             adId,
             locationId,
-            locationName,
+            locationName: locationName.name,
             userSessionId,
             ipAddress,
             userAgent
         });
-        return res.redirect('https://yourdestination.com/success');
+        res.redirect('https://yourdestination.com/success');
     } catch (err) {
         console.error('Scan save error:', err);
-        return res.status(500).send('Tracking error.');
+        res.status(500).send('Tracking error.');
     }
 });
+
 
 // View all scans
 app.get('/scans', async (req, res) => {
     try {
+        // Fetch the latest scans from the database
         const scans = await Scan.find().sort({ timestamp: -1 });
 
-        // Analytics
+        if (!scans || scans.length === 0) {
+            return res.send('<h1>No scans found</h1>'); // Early return if no scans
+        }
+
+        // Count unique user sessions
         const totalScans = scans.length;
         const uniqueSessions = new Set(scans.map(scan => scan.userSessionId)).size;
 
-        // Scans by location and ad
+        // Organize scans by location and ad
         const scansByLocation = {};
         const scansByAd = {};
-        let firstScanTime = scans[scans.length - 1]?.timestamp;
-        let lastScanTime = scans[0]?.timestamp;
-
         scans.forEach(scan => {
             scansByLocation[scan.locationId] = (scansByLocation[scan.locationId] || 0) + 1;
             scansByAd[scan.adId] = (scansByAd[scan.adId] || 0) + 1;
         });
 
-        // HTML header and analytics summary
+        // Generate HTML report with scans and table
         let html = `
         <html>
         <head>
             <title>QR Scan Analytics</title>
             <style>
-                body { font-family: Arial, sans-serif; padding: 20px; background: #f8f8f8; }
-                h1 { margin-bottom: 5px; }
-                h2 { margin-top: 40px; }
-                .stats { background: #fff; padding: 20px; margin-bottom: 20px; border: 1px solid #ddd; }
-                .stats p { margin: 5px 0; }
-                table { border-collapse: collapse; width: 100%; background: #fff; }
-                th, td { padding: 10px; border: 1px solid #ccc; text-align: left; }
-                th { background: #333; color: white; }
-                tr:nth-child(even) { background-color: #f2f2f2; }
-                ul { margin: 0; padding-left: 20px; }
+                table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #f2f2f2; }
+                tr:nth-child(even) { background-color: #f9f9f9; }
             </style>
         </head>
         <body>
             <h1>QR Code Scan Analytics</h1>
-            <div class="stats">
-                <p><strong>Total Scans:</strong> ${totalScans}</p>
-                <p><strong>Unique Sessions:</strong> ${uniqueSessions}</p>
-                <p><strong>Time Range:</strong> ${firstScanTime?.toLocaleString()} to ${lastScanTime?.toLocaleString()}</p>
-                <p><strong>Scans by Location:</strong></p>
-                <ul>
-                    ${Object.entries(scansByLocation).map(([loc, count]) => `<li>${loc}: ${count}</li>`).join('')}
-                </ul>
-                <p><strong>Scans by Ad:</strong></p>
-                <ul>
-                    ${Object.entries(scansByAd).map(([ad, count]) => `<li>${ad}: ${count}</li>`).join('')}
-                </ul>
-            </div>
+            <p>Total Scans: ${totalScans}</p>
+            <p>Unique Sessions: ${uniqueSessions}</p>
+            <h2>Scans by Location</h2>
+            <ul>
+                ${Object.entries(scansByLocation).map(([loc, count]) => `<li>${loc}: ${count}</li>`).join('')}
+            </ul>
+            <h2>Scans by Ad</h2>
+            <ul>
+                ${Object.entries(scansByAd).map(([ad, count]) => `<li>${ad}: ${count}</li>`).join('')}
+            </ul>
 
-            <h2>Detailed Scan Logs</h2>
+            <h2>Recent Scans</h2>
             <table>
-                <tr>
-                    <th>Ad ID</th>
-                    <th>Location ID</th>
-                    <th>Location Name</th>
-                    <th>Code</th>
-                    <th>Timestamp</th>
-                </tr>
-        `;
-
-        // Add table rows
-        scans.forEach(scan => {
-            html += `
-                <tr>
-                    <td>${scan.adId}</td>
-                    <td>${scan.locationId}</td>
-                    <td>${scan.locationName || '-'}</td>
-                    <td>${scan.code}</td>
-                    <td>${scan.timestamp.toLocaleString()}</td>
-                </tr>
-            `;
-        });
-
-        html += `
+                <thead>
+                    <tr>
+                        <th>Code</th>
+                        <th>Location</th>
+                        <th>Timestamp</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${scans.map(scan => `
+                        <tr>
+                            <td>${scan.code}</td>
+                            <td>${scan.locationName}</td>
+                            <td>${moment(scan.timestamp).format('YYYY-MM-DD HH:mm:ss')}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
             </table>
         </body>
         </html>
         `;
-
         res.send(html);
     } catch (err) {
         console.error('Scan analytics error:', err);
         res.status(500).send('Failed to load analytics.');
     }
 });
+
 
 
 
