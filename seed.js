@@ -20,6 +20,7 @@ mongoose.connect(process.env.MONGODB_URI, { dbName: 'qrtrack' })
             { locationId: 'UMass Boston', name: 'Wheatley, McCormack, UHall, Campus Center' },
             { locationId: 'Hardvard Sq', name: 'Harvard Sq' },
             { locationId: 'Boston Wharfs', name: 'Boston Wharfs' },
+            { locationId: 'GI Joe', name: 'GI Joe' },
 
         ]);
 
