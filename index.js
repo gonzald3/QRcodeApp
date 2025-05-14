@@ -88,7 +88,7 @@ app.get('/', requireBasicAuth, async (req, res) => {
         // Generate QR codes for each ad-location pair
         const qrCodes = await Promise.all(ads.map(async ({ adId, name }) => {
             return Promise.all(locations.map(async ({ locationId, name: locationName }) => {
-                const token = generateSignedToken(adId, locationId);
+                const token = generateSignedToken(adId, locationId);  // Using sanitized IDs
                 const baseUrl = process.env.BASE_URL || 'https://qrcodeapplication-4ecfc40322a3.herokuapp.com';
                 const url = `${baseUrl}/track/${token}`;
                 const qrCodeDataUrl = await QRCode.toDataURL(encodeURI(url));
@@ -98,7 +98,7 @@ app.get('/', requireBasicAuth, async (req, res) => {
 
         // Flatten the array of QR codes
         const qrCodeHtml = qrCodes.flat().map(qr => {
-            const token = generateSignedToken(qr.adId, qr.locationId);
+            const token = generateSignedToken(qr.adId, qr.locationId);  // Using sanitized IDs
             const baseUrl = process.env.BASE_URL || 'https://qrcodeapplication-4ecfc40322a3.herokuapp.com';
             const url = `${baseUrl}/track/${token}`;
         
@@ -174,7 +174,7 @@ app.use('/scans', scanViewLimiter);
 
 // QR scan tracking
 app.get('/track/:token', async (req, res) => {
-    const tokenData = verifySignedToken(req.params.token);
+    const tokenData = verifySignedToken(req.params.token);  // This function verifies the sanitized token
     if (!tokenData) return res.status(400).send('Invalid QR code');
 
     const { adId, locationId } = tokenData;
@@ -230,6 +230,7 @@ app.get('/track/:token', async (req, res) => {
         res.status(500).send('Tracking error.');
     }
 });
+
 
 
 
