@@ -97,12 +97,20 @@ app.get('/', requireBasicAuth, async (req, res) => {
         }));
 
         // Flatten the array of QR codes
-        const qrCodeHtml = qrCodes.flat().map(qr => `
-            <div class="qr-item">
-                <h3>${qr.adId} - ${qr.locationName}</h3>
-                <img src="${qr.qrCodeDataUrl}" alt="QR Code for ${qr.adId} - ${qr.locationName}">
-            </div>
-        `).join('');
+        const qrCodeHtml = qrCodes.flat().map(qr => {
+            const token = generateSignedToken(qr.adId, qr.locationId);
+            const baseUrl = process.env.BASE_URL || 'https://qrcodeapplication-4ecfc40322a3.herokuapp.com';
+            const url = `${baseUrl}/track/${token}`;
+        
+            return `
+                <div class="qr-item">
+                    <h3>${qr.adId} - ${qr.locationName}</h3>
+                    <a href="${url}" target="_blank">
+                        <img src="${qr.qrCodeDataUrl}" alt="QR Code for ${qr.adId} - ${qr.locationName}">
+                    </a>
+                </div>
+            `;
+        }).join('');
 
         // Send the HTML response with inline styles
         res.send(`
