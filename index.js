@@ -61,10 +61,17 @@ function isValidParam(value) {
     return /^[a-zA-Z0-9\-]+$/.test(value);
 }
 
+function sanitizeId(id) {
+    // Replace spaces with dashes and remove non-alphanumeric characters except for dashes
+    return id.replace(/[^a-zA-Z0-9\-]/g, '-');
+}
+
 function generateSignedToken(adId, locationId) {
-    const data = `${adId}:${locationId}`;
+    const sanitizedAdId = sanitizeId(adId);  // Sanitize the adId
+    const sanitizedLocationId = sanitizeId(locationId);  // Sanitize the locationId
+    const data = `${sanitizedAdId}:${sanitizedLocationId}`;  // Use sanitized IDs
     const hash = crypto.createHmac('sha256', TOKEN_SECRET).update(data).digest('hex');
-    return `${adId}-${locationId}-${hash}`;
+    return `${sanitizedAdId}-${sanitizedLocationId}-${hash}`;  // Return the signed token
 }
 
 function verifySignedToken(token) {
