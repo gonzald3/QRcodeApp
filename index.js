@@ -181,7 +181,21 @@ app.get('/track/:token', async (req, res) => {
     const locationName = await Location.findOne({ locationId }).select('name');
     if (!locationName) return res.status(400).send('Invalid location');
 
-    const userSessionId = req.cookies.userSessionId || generateUniqueSessionId();
+    
+    //generate a session cookie
+    let userSessionId = req.cookies.userSessionId;
+
+    if (!userSessionId) {
+        userSessionId = generateUniqueSessionId();
+        res.cookie('userSessionId', userSessionId, {
+            maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+            httpOnly: true,
+            secure: true,
+            sameSite: 'Strict'
+        });
+    }
+
+
     const ipAddress = req.ip;
     const userAgent = req.get('User-Agent');
 
