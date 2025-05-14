@@ -14,13 +14,13 @@ const basicAuth = require('express-basic-auth'); // for password username
 const port = process.env.PORT || 5000;
 const TOKEN_SECRET = process.env.TOKEN_SECRET || 'yoursecretkey'; // Add to .env
 
-
-// Apply basic authentication to the homepage route (`/`)
-app.use('/', basicAuth({
+const requireBasicAuth = basicAuth({
     users: { [process.env.BASIC_AUTH_USER]: process.env.BASIC_AUTH_PASSWORD },
     challenge: true,
     realm: 'QR Code Authentication'
-  }));
+  });
+
+
 
 app.set('trust proxy', 1);
 
@@ -79,7 +79,7 @@ function verifySignedToken(token) {
 
 
 // Home page with test QR codes
-app.get('/', async (req, res) => {
+app.get('/', requireBasicAuth, async (req, res) => {
     try {
         // Fetch ads and locations from the database
         const ads = await Ad.find();
