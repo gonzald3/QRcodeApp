@@ -181,8 +181,7 @@ app.get('/track/:token', async (req, res) => {
     const locationName = await Location.findOne({ locationId }).select('name');
     if (!locationName) return res.status(400).send('Invalid location');
 
-    
-    //generate a session cookie
+    // Generate a session cookie
     let userSessionId = req.cookies.userSessionId;
 
     if (!userSessionId) {
@@ -195,15 +194,27 @@ app.get('/track/:token', async (req, res) => {
         });
     }
 
-
     const ipAddress = req.ip;
     const userAgent = req.get('User-Agent');
 
-    // Save scan to the database
-    try {
-        const existingScan = await Scan.findOne({ code: `${adId}-${locationId}`, userSessionId });
-        if (existingScan) return res.redirect('https://yourdestination.com/already-scanned');
+    // Check for duplicate scan within 24 hours for same userSessionId, IP, and userAgent
+    const existingScan = await Scan.findOne({
+        code: `${adId}-${locationId}`,
+        $or: [
+            { userSessionId },
+            { ipAddress, userAgent }
+        ],
+        timestamp: { $gt: Date.now() - 24 * 60 * 60 * 1000 } // Only allow one scan per 24 hours
+    });
 
+    // If a duplicate scan is found, redirect
+    if (existingScan) {
+        console.log('Duplicate scan detected:', { adId, locationId, userSessionId, ipAddress, userAgent });
+        return res.redirect('https://yourdestination.com/already-scanned');
+    }
+
+    // Save the scan
+    try {
         await Scan.create({
             code: `${adId}-${locationId}`,
             adId,
@@ -219,6 +230,7 @@ app.get('/track/:token', async (req, res) => {
         res.status(500).send('Tracking error.');
     }
 });
+
 
 
 // View all scans
