@@ -3,13 +3,14 @@ const express = require('express');
 const mongoose = require('mongoose');
 const QRCode = require('qrcode');
 const app = express();
-const moment = require('moment');
+const moment = require('moment-timezone');
 const rateLimit = require('express-rate-limit');
 const cookieParser = require('cookie-parser');
 const crypto = require('crypto');
 const Ad = require('./models/Ad');  // Import the Ad model
 const Location = require('./models/Location');  // Import the Location model
 const basicAuth = require('express-basic-auth'); // for password username
+
 
 const port = process.env.PORT || 5000;
 const TOKEN_SECRET = process.env.TOKEN_SECRET || 'yoursecretkey'; // Add to .env
@@ -295,7 +296,7 @@ app.get('/scans', async (req, res) => {
                         <tr>
                             <td>${scan.code}</td>
                             <td>${scan.locationName}</td>
-                            <td>${moment(scan.timestamp).format('YYYY-MM-DD HH:mm:ss')}</td>
+                            <td>${moment(scan.timestamp).tz('America/New_York').format('YYYY-MM-DD hh:mm:ss A')}</td>
                         </tr>
                     `).join('')}
                 </tbody>
