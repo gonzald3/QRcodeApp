@@ -12,6 +12,18 @@ const Location = require('./models/Location');  // Import the Location model
 const basicAuth = require('express-basic-auth'); // for password username
 
 
+const ExcelJS = require('exceljs');
+const fs = require('fs');
+const path = require('path');
+
+// Ensure the 'public' folder exists
+const publicDir = path.join(__dirname, 'public');
+if (!fs.existsSync(publicDir)) {
+    fs.mkdirSync(publicDir);
+}
+
+
+
 const port = process.env.PORT || 5000;
 const TOKEN_SECRET = process.env.TOKEN_SECRET || 'yoursecretkey'; // Add to .env
 
@@ -69,96 +81,139 @@ function generateSignedToken(adId, locationId) {
 }
 
 function verifySignedToken(token) {
-    const parts = token.split('-');
-    if (parts.length < 3) return null;
-    const hash = parts.pop();
-    const locationId = parts.pop();
-    const adId = parts.join('-');
+    const hashMatch = token.match(/-([a-f0-9]{64})$/);
+    if (!hashMatch) return null;
+
+    const hash = hashMatch[1];
+    const withoutHash = token.slice(0, token.length - hash.length - 1); // remove last dash + hash
+    const lastDash = withoutHash.lastIndexOf('-');
+
+    if (lastDash === -1) return null;
+
+    const adId = withoutHash.slice(0, lastDash);
+    const locationId = withoutHash.slice(lastDash + 1);
+
     const expected = crypto.createHmac('sha256', TOKEN_SECRET).update(`${adId}:${locationId}`).digest('hex');
-    return (expected === hash) ? { adId, locationId } : null;
+
+    if (expected !== hash) {
+        console.log('❌ HASH MISMATCH');
+        console.log('adId:', adId);
+        console.log('locationId:', locationId);
+        console.log('expected:', expected);
+        console.log('received:', hash);
+        console.log('TOKEN_SECRET used:', TOKEN_SECRET);
+    }
+    
+
+    return expected === hash ? { adId, locationId } : null;
 }
+
+
 
 
 // Home page with test QR codes
 app.get('/', requireBasicAuth, async (req, res) => {
     try {
-        // Fetch ads and locations from the database
         const ads = await Ad.find();
         const locations = await Location.find();
 
-        // Generate QR codes for each ad-location pair
-        const qrCodes = await Promise.all(ads.map(async ({ adId, name }) => {
+        const baseUrl = process.env.BASE_URL || 'https://qrcodeapplication-4ecfc40322a3.herokuapp.com';
+        const qrMetadata = [];
+
+        const qrCodes = await Promise.all(ads.map(async ({ adId, name: adName }) => {
             return Promise.all(locations.map(async ({ locationId, name: locationName }) => {
-                const token = generateSignedToken(adId, locationId);  // Using sanitized IDs
-                const baseUrl = process.env.BASE_URL || 'https://qrcodeapplication-4ecfc40322a3.herokuapp.com';
+                const token = generateSignedToken(adId, locationId);
                 const url = `${baseUrl}/track/${token}`;
                 const qrCodeDataUrl = await QRCode.toDataURL(encodeURI(url));
-                return { adId, locationId, locationName, qrCodeDataUrl };
+
+
+                qrMetadata.push({ adId, adName, locationId, locationName, url });
+
+                return `
+                    <div class="qr-item">
+                        <h3>${adId} - ${locationName}</h3>
+                        <a href="${url}" target="_blank">
+                            <img src="${qrCodeDataUrl}" alt="QR Code for ${adId} - ${locationName}">
+                        </a>
+                    </div>
+                `;
             }));
         }));
 
-        // Flatten the array of QR codes
-        const qrCodeHtml = qrCodes.flat().map(qr => {
-            const token = generateSignedToken(qr.adId, qr.locationId);  // Using sanitized IDs
-            const baseUrl = process.env.BASE_URL || 'https://qrcodeapplication-4ecfc40322a3.herokuapp.com';
-            const url = `${baseUrl}/track/${token}`;
-        
-            return `
-                <div class="qr-item">
-                    <h3>${qr.adId} - ${qr.locationName}</h3>
-                    <a href="${url}" target="_blank">
-                        <img src="${qr.qrCodeDataUrl}" alt="QR Code for ${qr.adId} - ${qr.locationName}">
-                    </a>
-                </div>
-            `;
-        }).join('');
+        // Generate Excel file
+        const workbook = new ExcelJS.Workbook();
+        const sheet = workbook.addWorksheet('QR Metadata');
 
-        // Send the HTML response with inline styles
+        sheet.columns = [
+            { header: 'Ad ID', key: 'adId', width: 15 },
+            { header: 'Ad Name', key: 'adName', width: 25 },
+            { header: 'Location ID', key: 'locationId', width: 15 },
+            { header: 'Location Name', key: 'locationName', width: 25 },
+            { header: 'QR URL', key: 'url', width: 50 },
+        ];
+        qrMetadata.forEach(row => sheet.addRow(row));
+
+
+
+        const publicDir = path.join(__dirname, 'public');
+            if (!fs.existsSync(publicDir)) {
+                fs.mkdirSync(publicDir);
+            }
+        const excelFilePath = path.join(__dirname, 'public', 'qr_metadata.xlsx');
+        await workbook.xlsx.writeFile(excelFilePath);
+
+        const qrCodeHtml = qrCodes.flat().join('');
+
         res.send(`
             <html>
-                <head>
-                    <title>QR Codes for Ads</title>
-                    <style>
-                        body {
-                            font-family: Arial, sans-serif;
-                            display: flex;
-                            flex-wrap: wrap;
-                            justify-content: space-between;
-                            padding: 20px;
-                        }
-                        .qr-container {
-                            display: flex;
-                            flex-wrap: wrap;
-                            justify-content: space-between;
-                        }
-                        .qr-item {
-                            text-align: center;
-                            border: 1px solid #ddd;
-                            border-radius: 8px;
-                            padding: 8px;
-                            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-                            background-color: #fff;
-                            width: 180px;
-                            margin: 10px;
-                        }
-                        .qr-item img {
-                            max-width: 100%;
-                            height: auto;
-                            border-radius: 4px;
-                        }
-                        .qr-item h3 {
-                            font-size: 1rem;
-                            margin-top: 8px;
-                            font-weight: bold;
-                        }
-                    </style>
-                </head>
-                <body>
-                    <h1>QR Codes for Ads</h1>
-                    <div class="qr-container">
-                        ${qrCodeHtml}
-                    </div>
-                </body>
+            <head>
+                <title>QR Codes for Ads</title>
+                <style>
+                    body {
+                        font-family: Arial, sans-serif;
+                        padding: 20px;
+                    }
+                    .qr-container {
+                        display: flex;
+                        flex-wrap: wrap;
+                        justify-content: space-between;
+                    }
+                    .qr-item {
+                        text-align: center;
+                        border: 1px solid #ddd;
+                        border-radius: 8px;
+                        padding: 8px;
+                        background-color: #fff;
+                        width: 180px;
+                        margin: 10px;
+                        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                    }
+                    .qr-item img {
+                        max-width: 100%;
+                        height: auto;
+                        border-radius: 4px;
+                    }
+                    h1 {
+                        margin-bottom: 10px;
+                    }
+                    .download-button {
+                        margin-bottom: 20px;
+                        display: inline-block;
+                        padding: 10px 20px;
+                        background-color: #007bff;
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 5px;
+                    }
+                </style>
+            </head>
+            <body>
+                <h1>QR Codes for Ads</h1>
+                <a href="/download-qr-excel" class="download-button" download>Download Excel Table</a>
+                <div class="qr-container">
+                    ${qrCodeHtml}
+                </div>
+            </body>
             </html>
         `);
     } catch (err) {
@@ -168,6 +223,12 @@ app.get('/', requireBasicAuth, async (req, res) => {
 });
 
 
+
+//serve the file
+app.get('/download-qr-excel', requireBasicAuth, (req, res) => {
+    const filePath = path.join(__dirname, 'public', 'qr_metadata.xlsx');
+    res.download(filePath, 'qr_metadata.xlsx');
+});
 
 
 // Rate limiters
