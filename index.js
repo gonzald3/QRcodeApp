@@ -10,6 +10,8 @@ const crypto = require('crypto');
 const Ad = require('./models/Ad');  // Import the Ad model
 const Location = require('./models/Location');  // Import the Location model
 const basicAuth = require('express-basic-auth'); // for password username
+const GeneratedPair = require('./models/GeneratedPair'); // at the top
+
 
 
 const ExcelJS = require('exceljs');
@@ -43,6 +45,7 @@ const corsOptions = {
     credentials: true
 };
 app.use(cors(corsOptions));
+app.use(express.urlencoded({ extended: true })); // to parse form data
 
 // Rate limiters
 const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 40, message: "Too many requests." });
@@ -71,8 +74,9 @@ function generateUniqueSessionId() {
 }
 
 function isValidParam(value) {
-    return /^[a-zA-Z0-9\-]+$/.test(value);
+    return /^[a-zA-Z0-9]+$/.test(value);  // ❌ no hyphen allowed
 }
+
 
 function generateSignedToken(adId, locationId) {
     const data = `${adId}:${locationId}`;
@@ -95,14 +99,7 @@ function verifySignedToken(token) {
 
     const expected = crypto.createHmac('sha256', TOKEN_SECRET).update(`${adId}:${locationId}`).digest('hex');
 
-    if (expected !== hash) {
-        console.log('❌ HASH MISMATCH');
-        console.log('adId:', adId);
-        console.log('locationId:', locationId);
-        console.log('expected:', expected);
-        console.log('received:', hash);
-        console.log('TOKEN_SECRET used:', TOKEN_SECRET);
-    }
+   
     
 
     return expected === hash ? { adId, locationId } : null;
@@ -111,7 +108,10 @@ function verifySignedToken(token) {
 
 
 
-// Home page with test QR codes
+// Middleware to store recent QR code generation result temporarily
+let recentQrCodeHtml = '';
+
+// Home page with all existing QR codes and latest generated QR code appended
 app.get('/', requireBasicAuth, async (req, res) => {
     try {
         const ads = await Ad.find();
@@ -125,7 +125,6 @@ app.get('/', requireBasicAuth, async (req, res) => {
                 const token = generateSignedToken(adId, locationId);
                 const url = `${baseUrl}/track/${token}`;
                 const qrCodeDataUrl = await QRCode.toDataURL(encodeURI(url));
-
 
                 qrMetadata.push({ adId, adName, locationId, locationName, url });
 
@@ -153,12 +152,10 @@ app.get('/', requireBasicAuth, async (req, res) => {
         ];
         qrMetadata.forEach(row => sheet.addRow(row));
 
-
-
         const publicDir = path.join(__dirname, 'public');
-            if (!fs.existsSync(publicDir)) {
-                fs.mkdirSync(publicDir);
-            }
+        if (!fs.existsSync(publicDir)) {
+            fs.mkdirSync(publicDir);
+        }
         const excelFilePath = path.join(__dirname, 'public', 'qr_metadata.xlsx');
         await workbook.xlsx.writeFile(excelFilePath);
 
@@ -210,8 +207,11 @@ app.get('/', requireBasicAuth, async (req, res) => {
             <body>
                 <h1>QR Codes for Ads</h1>
                 <a href="/download-qr-excel" class="download-button" download>Download Excel Table</a>
+                <a href="/generate" class="download-button">Generate New QR Code</a>
+
                 <div class="qr-container">
                     ${qrCodeHtml}
+                    ${recentQrCodeHtml ? `<div class="qr-item"><h3>Most Recent QR Code</h3>${recentQrCodeHtml}</div>` : ''}
                 </div>
             </body>
             </html>
@@ -220,6 +220,90 @@ app.get('/', requireBasicAuth, async (req, res) => {
         console.error('QR error:', err);
         res.status(500).send('Error generating QR codes.');
     }
+});
+
+//add new qr codes
+app.get('/generate', requireBasicAuth, (req, res) => {
+    res.send(`
+        <html>
+        <head>
+            <title>Generate New QR Code</title>
+            <script>
+                function validateForm() {
+                    const adId = document.getElementById("adId").value.trim();
+                    const locationId = document.getElementById("locationId").value.trim();
+                    const pattern = /^[a-zA-Z0-9]+$/;  // ❌ no hyphen allowed
+
+
+                    if (!pattern.test(adId) || !pattern.test(locationId)) {
+                        alert("❌ Invalid input! Only letters, numbers, and hyphens are allowed.");
+                        return false;
+                    }
+                    return true;
+                }
+            </script>
+        </head>
+        <body>
+            <h1>Generate New QR Code</h1>
+            <form method="POST" action="/generate" onsubmit="return validateForm();">
+                <label>
+                    Ad ID:
+                    <input id="adId" name="adId" required pattern="[a-zA-Z0-9]+" 
+                        title="Only letters and numbers are allowed. No hyphens." />
+                </label><br/>
+                <label>
+                    Location ID:
+                    <input id="locationId" name="locationId" required pattern="[a-zA-Z0-9\\-]+"
+                        title="Only letters, numbers, and hyphens are allowed." />
+                </label><br/>
+                <button type="submit">Generate QR</button>
+            </form>
+        </body>
+        </html>
+    `);
+});
+
+
+// POST generate QR code and store in memory
+app.post('/generate', requireBasicAuth, async (req, res) => {
+    const { adId, locationId } = req.body;
+
+    if (!isValidParam(adId) || !isValidParam(locationId)) {
+        return res.status(400).send('Invalid input.');
+    }
+
+    // Ensure ad exists
+    let ad = await Ad.findOne({ adId });
+    if (!ad) {
+        ad = await Ad.create({ adId, name: adId });
+    }
+
+    // Ensure location exists
+    let location = await Location.findOne({ locationId });
+    if (!location) {
+        location = await Location.create({ locationId, name: locationId });
+    }
+
+    const token = generateSignedToken(adId, locationId);
+    const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+    const url = `${baseUrl}/track/${token}`;
+
+    const qrCodeDataUrl = await QRCode.toDataURL(url);
+
+    recentQrCodeHtml = `<p><strong>Ad ID:</strong> ${adId}</p>
+                        <p><strong>Location ID:</strong> ${locationId}</p>
+
+                        <img src="${qrCodeDataUrl}" alt="Generated QR Code" />`;
+
+    res.send(`
+        <html>
+        <body>
+            <h2>Generated QR Code</h2>
+            ${recentQrCodeHtml}
+            <br/><br/><a href="/generate">Generate Another</a> | <a href="/">Back to Home</a>
+        </body>
+        </html>
+    `);
 });
 
 
