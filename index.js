@@ -11,6 +11,7 @@ const Ad = require('./models/Ad');
 const Location = require('./models/Location');
 const basicAuth = require('express-basic-auth');
 const GeneratedPair = require('./models/GeneratedPair');
+const helmet = require('helmet'); // Added for security
 
 const ExcelJS = require('exceljs');
 const fs = require('fs');
@@ -32,8 +33,8 @@ function isValidHttpUrl(string) {
     }
 }
 
-const port = process.env.PORT || 4200; // Changed to 4200 since you're using that
-const TOKEN_SECRET = process.env.TOKEN_SECRET || 'yoursecretkey';
+const port = process.env.PORT || 4200;
+const TOKEN_SECRET = process.env.TOKEN_SECRET || crypto.randomBytes(32).toString('hex'); // Better default
 
 const requireBasicAuth = basicAuth({
     users: { [process.env.BASIC_AUTH_USER]: process.env.BASIC_AUTH_PASSWORD },
@@ -41,23 +42,60 @@ const requireBasicAuth = basicAuth({
     realm: 'QR Code Authentication'
 });
 
-app.set('trust proxy', 1);
+app.set('trust proxy', 1); // Trust Heroku's proxy
+
+// Security middleware
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdnjs.cloudflare.com"],
+            fontSrc: ["'self'", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com"],
+            scriptSrc: ["'self'", "'unsafe-inline'"],
+            imgSrc: ["'self'", "data:", "https:"]
+        }
+    }
+}));
 
 const cors = require('cors');
 const corsOptions = {
-    origin: ['http://localhost:4200', 'http://192.168.86.22:4200'], // Updated for local use
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        
+        const allowedOrigins = [
+            'http://localhost:4200',
+            'http://192.168.86.22:4200',
+            process.env.BASE_URL
+        ].filter(Boolean);
+        
+        if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     credentials: true
 };
 app.use(cors(corsOptions));
+
 app.use(express.urlencoded({ extended: true }));
 
 // Rate limiters
-const limiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 40, message: "Too many requests." });
-const scanViewLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 50, message: "Too many requests." });
+const limiter = rateLimit({ 
+    windowMs: 15 * 60 * 1000, 
+    max: 100, 
+    message: "Too many requests." 
+});
+const scanViewLimiter = rateLimit({ 
+    windowMs: 15 * 60 * 1000, 
+    max: 100, 
+    message: "Too many requests." 
+});
 const hybridLimiter = rateLimit({
-    keyGenerator: (req) => req.ip + req.cookies.userSessionId,
+    keyGenerator: (req) => req.ip + (req.cookies.userSessionId || ''),
     windowMs: 15 * 60 * 1000,
-    max: 100,
+    max: 150,
     message: "Too many requests, please try again later",
 });
 
@@ -65,9 +103,17 @@ const Scan = require('./models/Scan');
 app.use(cookieParser());
 app.use(express.json());
 
-mongoose.connect(process.env.MONGODB_URI, { dbName: 'qrtrack' })
-  .then(() => console.log("MongoDB connected"))
-  .catch(err => { console.error("MongoDB error:", err); process.exit(1); });
+// MongoDB connection with Heroku compatibility
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/qrtrack', { 
+    dbName: 'qrtrack',
+    serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
+})
+.then(() => console.log("✅ MongoDB connected successfully"))
+.catch(err => { 
+    console.error("❌ MongoDB connection error:", err); 
+    process.exit(1); 
+});
 
 // Utils
 function generateUniqueSessionId() {
@@ -84,11 +130,18 @@ function generateSignedToken(adId, locationId) {
     return `${adId}-${locationId}-${hash}`;
 }
 
-// Add this after other middleware, before your routes
+// Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Add a layout wrapper function
-function layout(content, title = 'QR Code Manager', showNav = true) {
+async function layout(content, title = 'QR Code Manager', showNav = true) {
+    let totalScans = 0;
+    try {
+        totalScans = await Scan.countDocuments();
+    } catch (err) {
+        console.error('Error getting scan count:', err);
+    }
+    
     return `
     <!DOCTYPE html>
     <html lang="en">
@@ -98,9 +151,17 @@ function layout(content, title = 'QR Code Manager', showNav = true) {
         <title>${title}</title>
         <link rel="stylesheet" href="/style.css">
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&display=swap" rel="stylesheet">
         <style>
-            body { font-family: 'Inter', sans-serif; }
+            body, button, input, select, textarea {
+                font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            }
+            * {
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+            }
         </style>
     </head>
     <body>
@@ -135,7 +196,10 @@ function layout(content, title = 'QR Code Manager', showNav = true) {
             </main>
             
             <footer class="footer">
-                <p>QR Code Manager &copy; ${new Date().getFullYear()} | Base URL: ${process.env.BASE_URL || 'localhost'}</p>
+                <p>QR Code Manager &copy; ${new Date().getFullYear()} | Environment: ${process.env.NODE_ENV || 'development'} | Scans: ${totalScans}</p>
+                <p style="margin-top: 0.5rem; font-size: 0.9rem; opacity: 0.7;">
+                    Base URL: ${process.env.BASE_URL || 'Not configured'}
+                </p>
             </footer>
         </div>
         
@@ -197,14 +261,16 @@ function verifySignedToken(token) {
     return expected === hash ? { adId, locationId } : null;
 }
 
-// CRITICAL FIX: Function to ensure proper URLs
+// Function to ensure proper URLs for Heroku
 function getFullUrl(path, req) {
     // Always use BASE_URL from environment if set
     let baseUrl = process.env.BASE_URL;
     
     if (!baseUrl) {
-        // If no BASE_URL, construct from request (for local development)
-        baseUrl = `http://${req.get('host')}`;
+        // For Heroku - use x-forwarded-proto
+        const protocol = req.headers['x-forwarded-proto'] || 'http';
+        const host = req.get('host');
+        baseUrl = `${protocol}://${host}`;
     }
     
     // Ensure baseUrl doesn't end with slash
@@ -218,6 +284,15 @@ function getFullUrl(path, req) {
 
 // Middleware to store recent QR code generation result temporarily
 let recentQrCodeHtml = '';
+
+// Health check endpoint (required by Heroku)
+app.get('/health', (req, res) => {
+    res.status(200).json({ 
+        status: 'healthy', 
+        timestamp: new Date().toISOString(),
+        environment: process.env.NODE_ENV || 'development'
+    });
+});
 
 // Home page
 app.get('/', requireBasicAuth, async (req, res) => {
@@ -313,7 +388,7 @@ app.get('/', requireBasicAuth, async (req, res) => {
         }
         `;
 
-        res.send(layout(content, 'QR Code Dashboard'));
+        res.send(await layout(content, 'QR Code Dashboard'));
     } catch (err) {
         console.error('QR error:', err);
         const errorContent = `
@@ -782,7 +857,11 @@ app.get('/qr-preview/:adId/:locationId', requireBasicAuth, async (req, res) => {
 // Serve the file
 app.get('/download-qr-excel', requireBasicAuth, (req, res) => {
     const filePath = path.join(__dirname, 'public', 'qr_metadata.xlsx');
-    res.download(filePath, 'qr_metadata.xlsx');
+    if (fs.existsSync(filePath)) {
+        res.download(filePath, 'qr_metadata.xlsx');
+    } else {
+        res.status(404).send('File not found');
+    }
 });
 
 // Rate limiters
@@ -807,13 +886,13 @@ app.get('/track/:token', async (req, res) => {
         res.cookie('userSessionId', userSessionId, {
             maxAge: 30 * 24 * 60 * 60 * 1000,
             httpOnly: true,
-            secure: true,
-            sameSite: 'Strict'
+            secure: process.env.NODE_ENV === 'production', // Secure in production
+            sameSite: 'Lax'
         });
     }
 
-    const ipAddress = req.ip;
-    const userAgent = req.get('User-Agent');
+    const ipAddress = req.ip || req.connection.remoteAddress;
+    const userAgent = req.get('User-Agent') || 'Unknown';
 
     // Check for duplicate scan within 24 hours
     const existingScan = await Scan.findOne({
@@ -968,7 +1047,7 @@ app.get('/scans', async (req, res) => {
                         <span>${ad._id}</span>
                         <span class="badge badge-success">${ad.count}</span>
                     </div>
-                    <div style="height: 8px; background: #e9ecef; border-radius: 4px;">
+                    <div style="height: 8px; background: #e5e7eb; border-radius: 4px;">
                         <div style="height: 100%; width: ${(ad.count / Math.max(...scansByAd.map(a => a.count)) * 100)}%; 
                             background: var(--success-color); border-radius: 4px;"></div>
                     </div>
@@ -996,7 +1075,7 @@ app.get('/scans', async (req, res) => {
         </div>
         `;
         
-        res.send(layout(content, 'Scan Analytics'));
+        res.send(await layout(content, 'Scan Analytics'));
     } catch (err) {
         console.error('Analytics error:', err);
         const errorContent = `
@@ -1006,7 +1085,7 @@ app.get('/scans', async (req, res) => {
         </div>
         <a href="/scans" class="btn"><i class="fas fa-redo"></i> Try Again</a>
         `;
-        res.send(layout(errorContent, 'Analytics Error'));
+        res.send(await layout(errorContent, 'Analytics Error'));
     }
 });
 
@@ -1018,7 +1097,6 @@ app.get('/generate-qr/:adId/:locationId', async (req, res) => {
     }
 
     const token = generateSignedToken(adId, locationId);
-    // FIXED: Use getFullUrl function
     const url = getFullUrl(`/track/${token}`, req);
 
     QRCode.toDataURL(url, (err, qrCodeDataUrl) => {
@@ -1027,7 +1105,32 @@ app.get('/generate-qr/:adId/:locationId', async (req, res) => {
     });
 });
 
+// 404 handler
+app.use((req, res) => {
+    res.status(404).send(`
+        <div style="text-align: center; padding: 4rem 2rem;">
+            <h1 style="color: var(--danger-color);"><i class="fas fa-exclamation-triangle"></i> 404 - Page Not Found</h1>
+            <p style="margin: 2rem 0;">The page you're looking for doesn't exist.</p>
+            <a href="/" class="btn">Go to Dashboard</a>
+        </div>
+    `);
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error('Server error:', err);
+    res.status(500).send(`
+        <div style="text-align: center; padding: 4rem 2rem;">
+            <h1 style="color: var(--danger-color);"><i class="fas fa-exclamation-circle"></i> 500 - Server Error</h1>
+            <p style="margin: 2rem 0;">Something went wrong on our end.</p>
+            <a href="/" class="btn">Go to Dashboard</a>
+        </div>
+    `);
+});
+
 app.listen(port, () => {
-    console.log(`Server running on port ${port}`);
-    console.log(`BASE_URL: ${process.env.BASE_URL || 'Not set (using localhost)'}`);
+    console.log(`🚀 Server running on port ${port}`);
+    console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🔗 Health check: http://localhost:${port}/health`);
+    console.log(`📊 Dashboard: http://localhost:${port}/`);
 });
