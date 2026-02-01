@@ -403,7 +403,7 @@ app.get('/', requireBasicAuth, async (req, res) => {
 });
 
 // Generate page: Add new QR codes
-app.get('/generate', requireBasicAuth, (req, res) => {
+app.get('/generate', requireBasicAuth, async (req, res) => {
     const content = `
     <div class="form-container">
         <h2><i class="fas fa-plus-circle"></i> Generate New QR Code</h2>
@@ -519,7 +519,7 @@ app.get('/generate', requireBasicAuth, (req, res) => {
     </script>
     `;
     
-    res.send(layout(content, 'Generate QR Code'));
+    res.send(await layout(content, 'Generate QR Code'));
 });
 
 // POST generate QR code and store in memory
@@ -711,7 +711,7 @@ app.get('/manage-urls', requireBasicAuth, async (req, res) => {
         </div>
         `;
         
-        res.send(layout(content, 'URL Management'));
+        res.send(await layout(content, 'URL Management'));
     } catch (err) {
         console.error('URL management error:', err);
         const errorContent = `
@@ -721,7 +721,7 @@ app.get('/manage-urls', requireBasicAuth, async (req, res) => {
         </div>
         <a href="/manage-urls" class="btn"><i class="fas fa-redo"></i> Try Again</a>
         `;
-        res.send(layout(errorContent, 'Management Error'));
+        res.send(await layout(errorContent, 'Management Error'));
     }
 });
 
