@@ -477,6 +477,15 @@ app.get('/generate', requireBasicAuth, async (req, res) => {
     </div>
 
     <script>
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            // Make sure the checkbox click handler is properly attached
+            const checkbox = document.getElementById('useCustomUrl');
+            if (checkbox) {
+                checkbox.addEventListener('change', toggleCustomUrl);
+            }
+        });
+        
         function validateForm() {
             const adId = document.getElementById("adId").value.trim();
             const locationId = document.getElementById("locationId").value.trim();
@@ -498,7 +507,8 @@ app.get('/generate', requireBasicAuth, async (req, res) => {
                 }
             }
             
-            if (document.getElementById("useCustomUrl").checked && customUrl && !isValidUrl(customUrl)) {
+            const useCustomUrl = document.getElementById("useCustomUrl").checked;
+            if (useCustomUrl && customUrl && !isValidUrl(customUrl)) {
                 alert("❌ Please enter a valid Custom URL (include http:// or https://)");
                 return false;
             }
@@ -509,11 +519,15 @@ app.get('/generate', requireBasicAuth, async (req, res) => {
         function toggleCustomUrl() {
             const useCustom = document.getElementById("useCustomUrl").checked;
             const customUrlInput = document.getElementById("customUrl");
-            customUrlInput.disabled = !useCustom;
-            if (!useCustom) {
-                customUrlInput.value = "";
-            } else {
+            console.log('toggleCustomUrl called, useCustom:', useCustom);
+            
+            // Remove the disabled attribute when checked
+            if (useCustom) {
+                customUrlInput.removeAttribute('disabled');
                 customUrlInput.focus();
+            } else {
+                customUrlInput.setAttribute('disabled', 'disabled');
+                customUrlInput.value = "";
             }
         }
     </script>
