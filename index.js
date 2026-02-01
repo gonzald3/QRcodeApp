@@ -539,86 +539,101 @@ app.get('/generate', requireBasicAuth, async (req, res) => {
 // POST generate QR code and store in memory
 // Update the POST /generate route
 app.post('/generate', requireBasicAuth, async (req, res) => {
-    const { adId, locationId, customUrl, defaultRedirect } = req.body;
-    const useCustomUrl = req.body.useCustomUrl === 'on';
+    try {
+        const { adId, locationId, customUrl, defaultRedirect } = req.body;
+        const useCustomUrl = req.body.useCustomUrl === 'on';
 
-    if (!isValidParam(adId) || !isValidParam(locationId)) {
-        return res.status(400).send('Invalid input.');
-    }
+        if (!isValidParam(adId) || !isValidParam(locationId)) {
+            return res.status(400).send('Invalid input.');
+        }
 
-    // Validate URLs if provided
-    if (useCustomUrl && customUrl && !isValidHttpUrl(customUrl)) {
-        return res.status(400).send('Invalid custom URL format. Include http:// or https://');
-    }
+        // Validate URLs if provided
+        if (useCustomUrl && customUrl && !isValidHttpUrl(customUrl)) {
+            return res.status(400).send('Invalid custom URL format. Include http:// or https://');
+        }
 
-    if (defaultRedirect && !isValidHttpUrl(defaultRedirect)) {
-        return res.status(400).send('Invalid default redirect URL format.');
-    }
+        if (defaultRedirect && !isValidHttpUrl(defaultRedirect)) {
+            return res.status(400).send('Invalid default redirect URL format.');
+        }
 
-    // Ensure ad exists
-    let ad = await Ad.findOne({ adId });
-    if (!ad) {
-        ad = await Ad.create({ adId, name: adId });
-    }
+        // Ensure ad exists
+        let ad = await Ad.findOne({ adId });
+        if (!ad) {
+            ad = await Ad.create({ adId, name: adId });
+        }
 
-    // Ensure location exists
-    let location = await Location.findOne({ locationId });
-    if (!location) {
-        location = await Location.create({ locationId, name: locationId });
-    }
+        // Ensure location exists
+        let location = await Location.findOne({ locationId });
+        if (!location) {
+            location = await Location.create({ locationId, name: locationId });
+        }
 
-    // Create or update GeneratedPair with custom URL
-    const generatedPair = await GeneratedPair.findOneAndUpdate(
-        { adId, locationId },
-        { 
-            customUrl: useCustomUrl ? customUrl : null,
-            defaultRedirect: defaultRedirect || 'https://acp.us',
-            updatedAt: Date.now()
-        },
-        { upsert: true, new: true }
-    );
+        // Create or update GeneratedPair with custom URL
+        const generatedPair = await GeneratedPair.findOneAndUpdate(
+            { adId, locationId },
+            { 
+                customUrl: useCustomUrl ? customUrl : null,
+                defaultRedirect: defaultRedirect || 'https://acp.us',
+                updatedAt: Date.now()
+            },
+            { upsert: true, new: true }
+        );
 
-    const token = generateSignedToken(adId, locationId);
-    const url = getFullUrl(`/track/${token}`, req);
-    const qrCodeDataUrl = await QRCode.toDataURL(url);
+        const token = generateSignedToken(adId, locationId);
+        const url = getFullUrl(`/track/${token}`, req);
+        const qrCodeDataUrl = await QRCode.toDataURL(url);
 
-    // Update recent QR display
-    recentQrCodeHtml = `
-        <div class="qr-item">
-            <h3>${adId} - ${location.name}</h3>
-            <p><strong>Tracking URL:</strong><br><small>${url}</small></p>
-            ${generatedPair.customUrl ? 
-                `<p><strong>Custom Redirect:</strong><br><small>${generatedPair.customUrl}</small></p>` : 
-                `<p><strong>Default Redirect:</strong><br><small>${generatedPair.defaultRedirect}</small></p>`
-            }
-            <img src="${qrCodeDataUrl}" alt="QR Code for ${adId} - ${location.name}">
-        </div>
-    `;
+        // Update recent QR display
+        recentQrCodeHtml = `
+            <div class="qr-item">
+                <h3>${adId} - ${location.name}</h3>
+                <p><strong>Tracking URL:</strong><br><small>${url}</small></p>
+                ${generatedPair.customUrl ? 
+                    `<p><strong>Custom Redirect:</strong><br><small>${generatedPair.customUrl}</small></p>` : 
+                    `<p><strong>Default Redirect:</strong><br><small>${generatedPair.defaultRedirect}</small></p>`
+                }
+                <img src="${qrCodeDataUrl}" alt="QR Code for ${adId} - ${location.name}">
+            </div>
+        `;
 
-    res.send(`
-        <html>
-        <head>
-            <title>QR Code Generated</title>
-            <style>
-                body { font-family: Arial, sans-serif; padding: 20px; }
-                .qr-container { text-align: center; margin: 20px 0; }
-                .qr-container img { max-width: 300px; height: auto; }
-                .info { background: #f5f5f5; padding: 15px; border-radius: 5px; margin: 20px 0; }
-            </style>
-        </head>
-        <body>
-            <h2>✅ QR Code Generated Successfully</h2>
-            <div class="info">
+        const content = `
+        <div style="text-align: center; padding: 2rem;">
+            <h2 style="color: var(--success-color);">
+                <i class="fas fa-check-circle"></i> QR Code Generated Successfully
+            </h2>
+            
+            <div style="margin: 2rem 0;">
                 ${recentQrCodeHtml}
             </div>
-            <br/>
-            <a href="/generate">Generate Another</a> | 
-            <a href="/manage-urls">Manage URLs</a> | 
-            <a href="/">Back to Home</a>
-        </body>
-        </html>
-    `);
-});
+            
+            <div style="display: flex; gap: 1rem; justify-content: center; margin-top: 2rem;">
+                <a href="/generate" class="btn btn-success">
+                    <i class="fas fa-plus"></i> Generate Another
+                </a>
+                <a href="/manage-urls" class="btn">
+                    <i class="fas fa-link"></i> Manage URLs
+                </a>
+                <a href="/" class="btn">
+                    <i class="fas fa-home"></i> Back to Home
+                </a>
+            </div>
+        </div>
+        `;
+        
+        res.send(await layout(content, 'QR Code Generated', true));
+        
+    } catch (err) {
+        console.error('Error in /generate POST:', err);
+        const errorContent = `
+        <div class="alert alert-danger">
+            <i class="fas fa-exclamation-circle"></i>
+            Error generating QR code: ${err.message}
+        </div>
+        <a href="/generate" class="btn"><i class="fas fa-redo"></i> Try Again</a>
+        `;
+        res.send(await layout(errorContent, 'Error', true));
+    }
+}); 
 
 // Manage URLS page: Add a management page for URLs
 app.get('/manage-urls', requireBasicAuth, async (req, res) => {
