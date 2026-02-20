@@ -58,26 +58,17 @@ app.use(helmet({
 }));
 
 const cors = require('cors');
-const corsOptions = {
-    origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps or curl requests)
-        if (!origin) return callback(null, true);
-        
-        const allowedOrigins = [
-            'http://localhost:4200',
-            'http://192.168.86.22:4200',
-            process.env.BASE_URL
-        ].filter(Boolean);
-        
-        if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
-            callback(null, true);
-        } else {
-            callback(new Error('Not allowed by CORS'));
-        }
-    },
-    credentials: true
-};
-app.use(cors(corsOptions));
+
+// Allow all origins for Heroku
+app.use(cors({
+    origin: true, // This allows any origin
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+}));
+
+// Handle preflight requests
+app.options('*', cors());
 
 app.use(express.urlencoded({ extended: true }));
 
@@ -540,35 +531,48 @@ app.get('/generate', requireBasicAuth, async (req, res) => {
 // Update the POST /generate route
 app.post('/generate', requireBasicAuth, async (req, res) => {
     try {
+        console.log('=== POST /generate START ===');
+        console.log('1. Request body:', req.body);
+        
         const { adId, locationId, customUrl, defaultRedirect } = req.body;
         const useCustomUrl = req.body.useCustomUrl === 'on';
+        
+        console.log('2. Parsed values:', { adId, locationId, customUrl, defaultRedirect, useCustomUrl });
 
+        // Validate IDs
         if (!isValidParam(adId) || !isValidParam(locationId)) {
+            console.log('3. ❌ Invalid ID params');
             return res.status(400).send('Invalid input.');
         }
+        console.log('3. ✅ ID params valid');
 
-        // Validate URLs if provided
+        // Validate URLs
         if (useCustomUrl && customUrl && !isValidHttpUrl(customUrl)) {
+            console.log('4. ❌ Invalid custom URL:', customUrl);
             return res.status(400).send('Invalid custom URL format. Include http:// or https://');
         }
-
-        if (defaultRedirect && !isValidHttpUrl(defaultRedirect)) {
-            return res.status(400).send('Invalid default redirect URL format.');
-        }
+        console.log('4. ✅ URL validation passed');
 
         // Ensure ad exists
+        console.log('5. Checking/creating Ad...');
         let ad = await Ad.findOne({ adId });
         if (!ad) {
+            console.log('5a. Creating new Ad:', adId);
             ad = await Ad.create({ adId, name: adId });
         }
+        console.log('5b. Ad found/created:', ad);
 
         // Ensure location exists
+        console.log('6. Checking/creating Location...');
         let location = await Location.findOne({ locationId });
         if (!location) {
+            console.log('6a. Creating new Location:', locationId);
             location = await Location.create({ locationId, name: locationId });
         }
+        console.log('6b. Location found/created:', location);
 
-        // Create or update GeneratedPair with custom URL
+        // Create or update GeneratedPair
+        console.log('7. Updating GeneratedPair...');
         const generatedPair = await GeneratedPair.findOneAndUpdate(
             { adId, locationId },
             { 
@@ -578,12 +582,23 @@ app.post('/generate', requireBasicAuth, async (req, res) => {
             },
             { upsert: true, new: true }
         );
+        console.log('7b. GeneratedPair updated:', generatedPair);
 
+        // Generate token and QR code
+        console.log('8. Generating token...');
         const token = generateSignedToken(adId, locationId);
+        console.log('8b. Token:', token);
+        
+        console.log('9. Getting full URL...');
         const url = getFullUrl(`/track/${token}`, req);
+        console.log('9b. URL:', url);
+        
+        console.log('10. Generating QR code...');
         const qrCodeDataUrl = await QRCode.toDataURL(url);
+        console.log('10b. QR code generated');
 
         // Update recent QR display
+        console.log('11. Creating recent QR HTML...');
         recentQrCodeHtml = `
             <div class="qr-item">
                 <h3>${adId} - ${location.name}</h3>
@@ -595,45 +610,83 @@ app.post('/generate', requireBasicAuth, async (req, res) => {
                 <img src="${qrCodeDataUrl}" alt="QR Code for ${adId} - ${location.name}">
             </div>
         `;
+        console.log('11b. Recent QR HTML created');
 
+        // Create content
+        console.log('12. Creating content HTML...');
         const content = `
-        <div style="text-align: center; padding: 2rem;">
-            <h2 style="color: var(--success-color);">
-                <i class="fas fa-check-circle"></i> QR Code Generated Successfully
-            </h2>
+        <div style="text-align: center; padding: 4rem 2rem;">
+            <div style="font-size: 4rem; color: var(--success-color); margin-bottom: 2rem;">
+                <i class="fas fa-check-circle"></i>
+            </div>
+            <h2 class="semibold">QR Code Generated Successfully!</h2>
+            <p class="regular" style="color: #666; margin: 1rem 0 2rem;">
+                Your QR code has been created and is ready to use.
+            </p>
             
-            <div style="margin: 2rem 0;">
+            <div style="background: white; border-radius: var(--border-radius); padding: 2rem; margin: 2rem auto; max-width: 500px; box-shadow: var(--box-shadow);">
                 ${recentQrCodeHtml}
             </div>
             
             <div style="display: flex; gap: 1rem; justify-content: center; margin-top: 2rem;">
                 <a href="/generate" class="btn btn-success">
-                    <i class="fas fa-plus"></i> Generate Another
+                    <i class="fas fa-plus"></i> Create Another
                 </a>
                 <a href="/manage-urls" class="btn">
                     <i class="fas fa-link"></i> Manage URLs
                 </a>
                 <a href="/" class="btn">
-                    <i class="fas fa-home"></i> Back to Home
+                    <i class="fas fa-home"></i> Dashboard
                 </a>
             </div>
         </div>
         `;
+        console.log('12b. Content HTML created');
+
+        // Send response
+        console.log('13. Calling layout function...');
+        const finalHtml = await layout(content, 'Success!', true);
+        console.log('13b. Layout complete, sending response');
         
-        res.send(await layout(content, 'QR Code Generated', true));
+        res.send(finalHtml);
+        console.log('=== POST /generate END (SUCCESS) ===');
         
     } catch (err) {
-        console.error('Error in /generate POST:', err);
+        console.error('❌❌❌ ERROR in POST /generate:');
+        console.error('Error name:', err.name);
+        console.error('Error message:', err.message);
+        console.error('Error stack:', err.stack);
+        
         const errorContent = `
-        <div class="alert alert-danger">
-            <i class="fas fa-exclamation-circle"></i>
-            Error generating QR code: ${err.message}
+        <div style="text-align: center; padding: 2rem;">
+            <div style="font-size: 4rem; color: var(--danger-color); margin-bottom: 1rem;">
+                <i class="fas fa-exclamation-circle"></i>
+            </div>
+            <h2 style="color: var(--danger-color);">Error Generating QR Code</h2>
+            <p style="color: #666; margin: 1rem 0; font-family: monospace; background: #f5f5f5; padding: 1rem; border-radius: 8px;">
+                ${err.message}
+            </p>
+            <div style="display: flex; gap: 1rem; justify-content: center; margin-top: 2rem;">
+                <a href="/generate" class="btn"><i class="fas fa-redo"></i> Try Again</a>
+                <a href="/" class="btn"><i class="fas fa-home"></i> Dashboard</a>
+            </div>
         </div>
-        <a href="/generate" class="btn"><i class="fas fa-redo"></i> Try Again</a>
         `;
-        res.send(await layout(errorContent, 'Error', true));
+        
+        try {
+            const errorHtml = await layout(errorContent, 'Error', true);
+            res.status(500).send(errorHtml);
+        } catch (layoutErr) {
+            console.error('❌ Even error layout failed:', layoutErr);
+            res.status(500).send(`
+                <h1>Error</h1>
+                <p>${err.message}</p>
+                <pre>${err.stack}</pre>
+                <a href="/">Go Home</a>
+            `);
+        }
     }
-}); 
+});
 
 // Manage URLS page: Add a management page for URLs
 app.get('/manage-urls', requireBasicAuth, async (req, res) => {
