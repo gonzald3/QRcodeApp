@@ -236,20 +236,52 @@ async function layout(content, title = 'QR Code Manager', showNav = true) {
 }
 
 function verifySignedToken(token) {
-    const hashMatch = token.match(/-([a-f0-9]{64})$/);
-    if (!hashMatch) return null;
-
-    const hash = hashMatch[1];
-    const withoutHash = token.slice(0, token.length - hash.length - 1);
-    const lastDash = withoutHash.lastIndexOf('-');
-
-    if (lastDash === -1) return null;
-
-    const adId = withoutHash.slice(0, lastDash);
-    const locationId = withoutHash.slice(lastDash + 1);
-
-    const expected = crypto.createHmac('sha256', TOKEN_SECRET).update(`${adId}:${locationId}`).digest('hex');
-    return expected === hash ? { adId, locationId } : null;
+    try {
+        console.log('Verifying token:', token);
+        
+        // Token format: adId-locationId-hash
+        const parts = token.split('-');
+        console.log('Token parts count:', parts.length);
+        
+        if (parts.length < 3) {
+            console.log('❌ Token has wrong number of parts');
+            return null;
+        }
+        
+        // The hash is always 64 characters (last part)
+        const hash = parts[parts.length - 1];
+        
+        // Check if hash is 64 chars (sha256)
+        if (hash.length !== 64) {
+            console.log('❌ Hash length is', hash.length, 'expected 64');
+            return null;
+        }
+        
+        // Reconstruct adId and locationId (adId might have hyphens)
+        const adId = parts.slice(0, parts.length - 2).join('-');
+        const locationId = parts[parts.length - 2];
+        
+        console.log('Extracted - adId:', adId, 'locationId:', locationId);
+        
+        // Verify hash
+        const expected = crypto.createHmac('sha256', TOKEN_SECRET)
+            .update(`${adId}:${locationId}`)
+            .digest('hex');
+        
+        const isValid = expected === hash;
+        console.log('Token valid:', isValid);
+        
+        if (!isValid) {
+            console.log('Expected hash:', expected);
+            console.log('Actual hash:  ', hash);
+        }
+        
+        return isValid ? { adId, locationId } : null;
+        
+    } catch (err) {
+        console.error('Error verifying token:', err);
+        return null;
+    }
 }
 
 // Function to ensure proper URLs for Heroku
@@ -951,53 +983,105 @@ app.use('/track', hybridLimiter);
 app.use('/scans', scanViewLimiter);
 
 // QR scan tracking
+// QR scan tracking - FIXED VERSION
 app.get('/track/:token', async (req, res) => {
-    const tokenData = verifySignedToken(req.params.token);
-    if (!tokenData) return res.status(400).send('Invalid QR code');
-
-    const { adId, locationId } = tokenData;
-    
-    // Find location name
-    const location = await Location.findOne({ locationId }).select('name');
-    if (!location) return res.status(400).send('Invalid location');
-
-    // Generate or get session cookie
-    let userSessionId = req.cookies.userSessionId;
-    if (!userSessionId) {
-        userSessionId = generateUniqueSessionId();
-        res.cookie('userSessionId', userSessionId, {
-            maxAge: 30 * 24 * 60 * 60 * 1000,
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production', // Secure in production
-            sameSite: 'Lax'
-        });
-    }
-
-    const ipAddress = req.ip || req.connection.remoteAddress;
-    const userAgent = req.get('User-Agent') || 'Unknown';
-
-    // Check for duplicate scan within 24 hours
-    const existingScan = await Scan.findOne({
-        code: `${adId}-${locationId}`,
-        $or: [
-            { userSessionId },
-            { ipAddress, userAgent }
-        ],
-        timestamp: { $gt: Date.now() - 24 * 60 * 60 * 1000 }
-    });
-
-    if (existingScan) {
-        console.log('Duplicate scan detected:', { adId, locationId, userSessionId });
-        
-        // Still redirect on duplicate, but to appropriate URL
-        const generatedPair = await GeneratedPair.findOne({ adId, locationId });
-        const redirectUrl = generatedPair?.customUrl || generatedPair?.defaultRedirect || 'https://acp.us';
-        return res.redirect(redirectUrl);
-    }
-
-    // Save the scan
     try {
-        await Scan.create({
+        console.log('=== QR CODE SCANNED ===');
+        console.log('Token:', req.params.token);
+        
+        const tokenData = verifySignedToken(req.params.token);
+        console.log('Token data:', tokenData);
+        
+        if (!tokenData) {
+            console.log('❌ Invalid token - redirecting to fallback');
+            return res.redirect('https://acp.us');
+        }
+
+        const { adId, locationId } = tokenData;
+        console.log('Ad ID:', adId, 'Location ID:', locationId);
+        
+        // Find location name
+        const location = await Location.findOne({ locationId }).select('name');
+        console.log('Location found:', location);
+        
+        if (!location) {
+            console.log('❌ Location not found - redirecting to fallback');
+            return res.redirect('https://acp.us');
+        }
+
+        // Generate or get session cookie
+        let userSessionId = req.cookies.userSessionId;
+        if (!userSessionId) {
+            userSessionId = generateUniqueSessionId();
+            console.log('Generated new session:', userSessionId);
+            res.cookie('userSessionId', userSessionId, {
+                maxAge: 30 * 24 * 60 * 60 * 1000,
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'Lax'
+            });
+        }
+
+        const ipAddress = req.ip || req.connection.remoteAddress;
+        const userAgent = req.get('User-Agent') || 'Unknown';
+        console.log('IP:', ipAddress, 'User Agent:', userAgent);
+
+        // Check for duplicate scan within 24 hours
+        const existingScan = await Scan.findOne({
+            code: `${adId}-${locationId}`,
+            $or: [
+                { userSessionId },
+                { ipAddress, userAgent }
+            ],
+            timestamp: { $gt: Date.now() - 24 * 60 * 60 * 1000 }
+        });
+        
+        console.log('Existing scan:', existingScan ? 'Yes' : 'No');
+
+        if (existingScan) {
+            console.log('Duplicate scan detected - redirecting without saving');
+            
+            // Get redirect URL from GeneratedPair
+            const generatedPair = await GeneratedPair.findOne({ adId, locationId });
+            console.log('Generated pair found:', generatedPair ? 'Yes' : 'No');
+            
+            // Determine redirect URL
+            let redirectUrl = 'https://acp.us'; // Default fallback
+            
+            if (generatedPair) {
+                if (generatedPair.customUrl) {
+                    redirectUrl = generatedPair.customUrl;
+                } else if (generatedPair.defaultRedirect) {
+                    redirectUrl = generatedPair.defaultRedirect;
+                }
+            }
+            
+            console.log('Redirecting duplicate scan to:', redirectUrl);
+            return res.redirect(redirectUrl);
+        }
+
+        // Save the scan
+        console.log('Creating new scan record...');
+        
+        // Get the redirect URL first (before saving)
+        const generatedPair = await GeneratedPair.findOne({ adId, locationId });
+        console.log('Generated pair found for redirect:', generatedPair ? 'Yes' : 'No');
+        
+        // Determine redirect URL
+        let redirectUrl = 'https://acp.us'; // Default fallback
+        
+        if (generatedPair) {
+            if (generatedPair.customUrl) {
+                redirectUrl = generatedPair.customUrl;
+            } else if (generatedPair.defaultRedirect) {
+                redirectUrl = generatedPair.defaultRedirect;
+            }
+        }
+        
+        console.log('Will redirect to:', redirectUrl);
+
+        // Save the scan (don't await - let it happen in background)
+        Scan.create({
             code: `${adId}-${locationId}`,
             adId,
             locationId,
@@ -1005,21 +1089,20 @@ app.get('/track/:token', async (req, res) => {
             userSessionId,
             ipAddress,
             userAgent
+        }).then(() => {
+            console.log('✅ Scan saved successfully');
+        }).catch(err => {
+            console.error('❌ Error saving scan:', err.message);
         });
 
-        // Find redirect URL from GeneratedPair
-        const generatedPair = await GeneratedPair.findOne({ adId, locationId });
-        
-        // Determine redirect URL (custom > default > fallback)
-        const redirectUrl = generatedPair?.customUrl || 
-                           generatedPair?.defaultRedirect || 
-                           'https://acp.us';
-        
+        // Redirect immediately
+        console.log('Redirecting user to:', redirectUrl);
         res.redirect(redirectUrl);
         
     } catch (err) {
-        console.error('Scan save error:', err);
-        res.status(500).send('Tracking error.');
+        console.error('❌❌❌ Track route error:', err);
+        // Always redirect somewhere, even on error
+        res.redirect('https://acp.us');
     }
 });
 
