@@ -983,125 +983,44 @@ app.use('/track', hybridLimiter);
 app.use('/scans', scanViewLimiter);
 
 // QR scan tracking
-// QR scan tracking - FIXED VERSION
 app.get('/track/:token', async (req, res) => {
     try {
-        console.log('=== QR CODE SCANNED ===');
-        console.log('Token:', req.params.token);
+        console.log('Track hit with token:', req.params.token);
         
-        const tokenData = verifySignedToken(req.params.token);
-        console.log('Token data:', tokenData);
+        // Extract from token format: adId-locationId-hash
+        const token = req.params.token;
+        const parts = token.split('-');
         
-        if (!tokenData) {
-            console.log('❌ Invalid token - redirecting to fallback');
-            return res.redirect('https://acp.us');
-        }
-
-        const { adId, locationId } = tokenData;
+        // Remove the last part (hash)
+        parts.pop();
+        
+        // Last remaining part is locationId
+        const locationId = parts.pop();
+        
+        // Everything else is adId
+        const adId = parts.join('-');
+        
         console.log('Ad ID:', adId, 'Location ID:', locationId);
         
-        // Find location name
-        const location = await Location.findOne({ locationId }).select('name');
-        console.log('Location found:', location);
+        // Look up redirect
+        const GeneratedPair = require('./models/GeneratedPair');
+        const pair = await GeneratedPair.findOne({ adId, locationId });
         
-        if (!location) {
-            console.log('❌ Location not found - redirecting to fallback');
-            return res.redirect('https://acp.us');
-        }
-
-        // Generate or get session cookie
-        let userSessionId = req.cookies.userSessionId;
-        if (!userSessionId) {
-            userSessionId = generateUniqueSessionId();
-            console.log('Generated new session:', userSessionId);
-            res.cookie('userSessionId', userSessionId, {
-                maxAge: 30 * 24 * 60 * 60 * 1000,
-                httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                sameSite: 'Lax'
-            });
-        }
-
-        const ipAddress = req.ip || req.connection.remoteAddress;
-        const userAgent = req.get('User-Agent') || 'Unknown';
-        console.log('IP:', ipAddress, 'User Agent:', userAgent);
-
-        // Check for duplicate scan within 24 hours
-        const existingScan = await Scan.findOne({
-            code: `${adId}-${locationId}`,
-            $or: [
-                { userSessionId },
-                { ipAddress, userAgent }
-            ],
-            timestamp: { $gt: Date.now() - 24 * 60 * 60 * 1000 }
-        });
+        let redirectUrl = 'https://acp.us';
         
-        console.log('Existing scan:', existingScan ? 'Yes' : 'No');
-
-        if (existingScan) {
-            console.log('Duplicate scan detected - redirecting without saving');
-            
-            // Get redirect URL from GeneratedPair
-            const generatedPair = await GeneratedPair.findOne({ adId, locationId });
-            console.log('Generated pair found:', generatedPair ? 'Yes' : 'No');
-            
-            // Determine redirect URL
-            let redirectUrl = 'https://acp.us'; // Default fallback
-            
-            if (generatedPair) {
-                if (generatedPair.customUrl) {
-                    redirectUrl = generatedPair.customUrl;
-                } else if (generatedPair.defaultRedirect) {
-                    redirectUrl = generatedPair.defaultRedirect;
-                }
-            }
-            
-            console.log('Redirecting duplicate scan to:', redirectUrl);
-            return res.redirect(redirectUrl);
-        }
-
-        // Save the scan
-        console.log('Creating new scan record...');
-        
-        // Get the redirect URL first (before saving)
-        const generatedPair = await GeneratedPair.findOne({ adId, locationId });
-        console.log('Generated pair found for redirect:', generatedPair ? 'Yes' : 'No');
-        
-        // Determine redirect URL
-        let redirectUrl = 'https://acp.us'; // Default fallback
-        
-        if (generatedPair) {
-            if (generatedPair.customUrl) {
-                redirectUrl = generatedPair.customUrl;
-            } else if (generatedPair.defaultRedirect) {
-                redirectUrl = generatedPair.defaultRedirect;
+        if (pair) {
+            if (pair.customUrl) {
+                redirectUrl = pair.customUrl;
+            } else if (pair.defaultRedirect) {
+                redirectUrl = pair.defaultRedirect;
             }
         }
         
-        console.log('Will redirect to:', redirectUrl);
-
-        // Save the scan (don't await - let it happen in background)
-        Scan.create({
-            code: `${adId}-${locationId}`,
-            adId,
-            locationId,
-            locationName: location.name,
-            userSessionId,
-            ipAddress,
-            userAgent
-        }).then(() => {
-            console.log('✅ Scan saved successfully');
-        }).catch(err => {
-            console.error('❌ Error saving scan:', err.message);
-        });
-
-        // Redirect immediately
-        console.log('Redirecting user to:', redirectUrl);
+        console.log('Redirecting to:', redirectUrl);
         res.redirect(redirectUrl);
         
     } catch (err) {
-        console.error('❌❌❌ Track route error:', err);
-        // Always redirect somewhere, even on error
+        console.error('Error:', err);
         res.redirect('https://acp.us');
     }
 });
