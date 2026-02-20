@@ -101,25 +101,6 @@ function generateSignedToken(adId, locationId) {
     return `${adId}-${locationId}-${hash}`;
 }
 
-function verifySignedToken(token) {
-    try {
-        const parts = token.split('-');
-        if (parts.length < 3) return null;
-        
-        const hash = parts.pop();
-        const locationId = parts.pop();
-        const adId = parts.join('-');
-        
-        const expected = crypto.createHmac('sha256', TOKEN_SECRET)
-            .update(`${adId}:${locationId}`)
-            .digest('hex');
-        
-        return expected === hash ? { adId, locationId } : null;
-    } catch (err) {
-        return null;
-    }
-}
-
 function getFullUrl(path, req) {
     let baseUrl = process.env.BASE_URL;
     if (!baseUrl) {
@@ -151,6 +132,108 @@ async function layout(content, title = 'QR Code Manager', showNav = true) {
         <link rel="stylesheet" href="/style.css">
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+        <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+                font-family: 'Inter', sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                padding: 20px;
+            }
+            .container {
+                max-width: 1400px;
+                margin: 0 auto;
+                background: white;
+                border-radius: 12px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                overflow: hidden;
+            }
+            .header {
+                background: linear-gradient(135deg, #4a6fa5 0%, #166088 100%);
+                color: white;
+                padding: 2rem;
+                text-align: center;
+            }
+            .nav-bar {
+                background: #1a1d21;
+                padding: 1rem;
+                display: flex;
+                justify-content: center;
+                gap: 1rem;
+                flex-wrap: wrap;
+            }
+            .nav-button {
+                background: rgba(255,255,255,0.1);
+                color: white;
+                padding: 0.75rem 1.5rem;
+                border-radius: 8px;
+                text-decoration: none;
+                transition: all 0.3s ease;
+            }
+            .nav-button:hover { background: rgba(255,255,255,0.2); }
+            .nav-button.primary { background: #4a6fa5; }
+            .nav-button.success { background: #10b981; }
+            .nav-button.warning { background: #f59e0b; }
+            .main-content { padding: 2rem; }
+            .stats-container {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                gap: 1.5rem;
+                margin-bottom: 2rem;
+            }
+            .stat-card {
+                background: white;
+                border-radius: 12px;
+                padding: 1.5rem;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                text-align: center;
+                border-top: 4px solid #4a6fa5;
+            }
+            .stat-value { font-size: 2.5rem; font-weight: bold; color: #4a6fa5; }
+            .qr-container {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+                gap: 1.5rem;
+            }
+            .qr-item {
+                background: white;
+                border-radius: 12px;
+                padding: 1.5rem;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                text-align: center;
+            }
+            .qr-item img { max-width: 200px; height: auto; }
+            .url-badge {
+                display: inline-block;
+                padding: 0.25rem 0.75rem;
+                border-radius: 20px;
+                font-size: 0.85rem;
+                margin-top: 0.5rem;
+            }
+            .url-badge.custom { background: #d1fae5; color: #065f46; }
+            .url-badge.default { background: #f3f4f6; color: #374151; }
+            .btn {
+                background: #4a6fa5;
+                color: white;
+                border: none;
+                padding: 0.75rem 1.5rem;
+                border-radius: 8px;
+                text-decoration: none;
+                display: inline-block;
+                transition: all 0.3s ease;
+            }
+            .btn-success { background: #10b981; }
+            .footer {
+                background: #1a1d21;
+                color: white;
+                text-align: center;
+                padding: 1.5rem;
+            }
+            @media (max-width: 768px) {
+                .nav-bar { flex-direction: column; }
+                .stats-container { grid-template-columns: 1fr; }
+            }
+        </style>
     </head>
     <body>
         <div class="container">
@@ -174,19 +257,9 @@ async function layout(content, title = 'QR Code Manager', showNav = true) {
             </main>
             
             <footer class="footer">
-                <p>QR Code Manager &copy; ${new Date().getFullYear()} | Environment: ${process.env.NODE_ENV || 'development'} | Scans: ${totalScans}</p>
-                <p>Base URL: ${process.env.BASE_URL || 'Not configured'}</p>
+                <p>QR Code Manager &copy; ${new Date().getFullYear()} | Scans: ${totalScans}</p>
             </footer>
         </div>
-        
-        <script>
-            setTimeout(() => {
-                document.querySelectorAll('.alert').forEach(alert => {
-                    alert.style.opacity = '0';
-                    setTimeout(() => alert.remove(), 500);
-                });
-            }, 5000);
-        </script>
     </body>
     </html>
     `;
@@ -200,7 +273,7 @@ app.get('/health', (req, res) => {
     res.status(200).json({ status: 'healthy' });
 });
 
-// ========== CRITICAL: TRACKING ROUTE (MUST BE EARLY) ==========
+// ========== TRACKING ROUTE (FIXED) ==========
 app.get('/track/:token', async (req, res) => {
     try {
         console.log('=== QR CODE SCANNED ===');
@@ -221,21 +294,15 @@ app.get('/track/:token', async (req, res) => {
         
         console.log('Ad ID:', adId, 'Location ID:', locationId);
         
-        // Find redirect URL
+        // Find redirect URL - FIRST check if this QR code exists
         const pair = await GeneratedPair.findOne({ adId, locationId });
         
-        let redirectUrl = 'https://acp.us'; // Default
-        
-        if (pair) {
-            if (pair.customUrl) {
-                redirectUrl = pair.customUrl;
-                console.log('Using custom URL:', redirectUrl);
-            } else if (pair.defaultRedirect) {
-                redirectUrl = pair.defaultRedirect;
-                console.log('Using default URL:', redirectUrl);
-            }
+        if (!pair) {
+            console.log('❌ QR code not found in database');
+            return res.redirect('https://acp.us');
         }
         
+        let redirectUrl = pair.customUrl || pair.defaultRedirect || 'https://acp.us';
         console.log('Redirecting to:', redirectUrl);
         
         // Track scan (don't await)
@@ -266,27 +333,33 @@ app.get('/track/:token', async (req, res) => {
 // ========== AUTHENTICATED ROUTES ==========
 app.use(['/', '/generate', '/manage-urls', '/scans', '/download-qr-excel'], requireBasicAuth);
 
-// ========== HOME PAGE ==========
+// ========== HOME PAGE (FIXED - ONLY SHOWS GENERATED COMBINATIONS) ==========
 app.get('/', async (req, res) => {
     try {
-        const ads = await Ad.find();
-        const locations = await Location.find();
+        // Get ONLY the combinations that have been generated
+        const pairs = await GeneratedPair.find().populate('adId').populate('locationId');
         const totalScans = await Scan.countDocuments();
         const uniqueSessions = await Scan.distinct('userSessionId').then(s => s.length);
         
         let qrCodeHtml = '';
         
-        const qrCodes = await Promise.all(ads.map(async ({ adId, name: adName }) => {
-            return Promise.all(locations.map(async ({ locationId, name: locationName }) => {
-                const token = generateSignedToken(adId, locationId);
+        if (pairs.length === 0) {
+            qrCodeHtml = '<p class="alert alert-warning">No QR codes generated yet. <a href="/generate">Generate your first QR code</a></p>';
+        } else {
+            const qrCodes = await Promise.all(pairs.map(async (pair) => {
+                const ad = await Ad.findOne({ adId: pair.adId });
+                const location = await Location.findOne({ locationId: pair.locationId });
+                
+                if (!ad || !location) return '';
+                
+                const token = generateSignedToken(pair.adId, pair.locationId);
                 const url = getFullUrl(`/track/${token}`, req);
                 const qrCodeDataUrl = await QRCode.toDataURL(encodeURI(url));
-                const pair = await GeneratedPair.findOne({ adId, locationId });
-                const hasCustomUrl = pair?.customUrl;
+                const hasCustomUrl = !!pair.customUrl;
                 
                 return `
                 <div class="qr-item">
-                    <h3>${adId} - ${locationName}</h3>
+                    <h3>${pair.adId} - ${location.name}</h3>
                     <p class="qr-url"><small>${url}</small></p>
                     <a href="${url}" target="_blank"><img src="${qrCodeDataUrl}" alt="QR Code"></a>
                     <div class="url-badge ${hasCustomUrl ? 'custom' : 'default'}">
@@ -296,19 +369,15 @@ app.get('/', async (req, res) => {
                 </div>
                 `;
             }));
-        }));
-
-        qrCodeHtml = qrCodes.flat().join('');
-        
-        if (recentQrCodeHtml) {
-            qrCodeHtml += `<div class="qr-item">${recentQrCodeHtml}</div>`;
+            
+            qrCodeHtml = qrCodes.filter(Boolean).join('');
         }
 
         const content = `
         <div class="stats-container">
             <div class="stat-card">
-                <h3>Total QR Pairs</h3>
-                <div class="stat-value">${ads.length * locations.length}</div>
+                <h3>Total QR Codes</h3>
+                <div class="stat-value">${pairs.length}</div>
             </div>
             <div class="stat-card">
                 <h3>Total Scans</h3>
@@ -318,17 +387,12 @@ app.get('/', async (req, res) => {
                 <h3>Unique Users</h3>
                 <div class="stat-value">${uniqueSessions}</div>
             </div>
-            <div class="stat-card">
-                <h3>Active Ads</h3>
-                <div class="stat-value">${ads.length}</div>
-            </div>
         </div>
 
-        <h2>All QR Codes</h2>
-        ${ads.length === 0 || locations.length === 0 ? 
-            `<div class="alert alert-warning">No QR codes found. <a href="/generate">Generate your first QR code</a></div>` : 
-            `<div class="qr-container">${qrCodeHtml}</div>`
-        }
+        <h2>Your QR Codes</h2>
+        <div class="qr-container">
+            ${qrCodeHtml}
+        </div>
         `;
 
         res.send(await layout(content, 'QR Code Dashboard'));
@@ -341,36 +405,44 @@ app.get('/', async (req, res) => {
 // ========== GENERATE PAGE ==========
 app.get('/generate', async (req, res) => {
     const content = `
-    <div class="form-container">
+    <div class="form-container" style="max-width: 600px; margin: 0 auto;">
         <h2>Generate New QR Code</h2>
         
+        <div class="alert alert-info">
+            <i class="fas fa-info-circle"></i> All QR codes track scans. You can set custom redirect URLs.
+        </div>
+        
         <form method="POST" action="/generate">
-            <div class="form-group">
-                <label>Ad ID *</label>
-                <input type="text" name="adId" required pattern="[a-zA-Z0-9]+">
+            <div class="form-group" style="margin-bottom: 1rem;">
+                <label style="display: block; margin-bottom: 0.5rem;">Ad ID *</label>
+                <input type="text" name="adId" required pattern="[a-zA-Z0-9]+" 
+                    style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 8px;">
             </div>
             
-            <div class="form-group">
-                <label>Location ID *</label>
-                <input type="text" name="locationId" required pattern="[a-zA-Z0-9\\-]+">
+            <div class="form-group" style="margin-bottom: 1rem;">
+                <label style="display: block; margin-bottom: 0.5rem;">Location ID *</label>
+                <input type="text" name="locationId" required pattern="[a-zA-Z0-9\\-]+"
+                    style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 8px;">
             </div>
             
-            <div class="form-group">
-                <label>Default Redirect URL</label>
-                <input type="url" name="defaultRedirect" value="https://acp.us">
+            <div class="form-group" style="margin-bottom: 1rem;">
+                <label style="display: block; margin-bottom: 0.5rem;">Default Redirect URL</label>
+                <input type="url" name="defaultRedirect" value="https://acp.us"
+                    style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 8px;">
             </div>
             
-            <div class="form-check">
-                <input type="checkbox" name="useCustomUrl" id="useCustomUrl">
+            <div class="form-check" style="margin-bottom: 1rem;">
+                <input type="checkbox" name="useCustomUrl" id="useCustomUrl" style="margin-right: 0.5rem;">
                 <label for="useCustomUrl">Set Custom URL</label>
             </div>
             
-            <div class="form-group">
-                <label>Custom URL</label>
-                <input type="url" name="customUrl" id="customUrl" disabled>
+            <div class="form-group" style="margin-bottom: 1rem;">
+                <label style="display: block; margin-bottom: 0.5rem;">Custom URL</label>
+                <input type="url" name="customUrl" id="customUrl" disabled
+                    style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 8px;">
             </div>
             
-            <button type="submit" class="btn btn-success">Generate QR Code</button>
+            <button type="submit" class="btn btn-success" style="width: 100%;">Generate QR Code</button>
         </form>
     </div>
 
@@ -394,9 +466,19 @@ app.post('/generate', async (req, res) => {
             return res.status(400).send('Invalid input.');
         }
 
-        let ad = await Ad.findOne({ adId }) || await Ad.create({ adId, name: adId });
-        let location = await Location.findOne({ locationId }) || await Location.create({ locationId, name: locationId });
+        // Create or update Ad
+        let ad = await Ad.findOne({ adId });
+        if (!ad) {
+            ad = await Ad.create({ adId, name: adId });
+        }
 
+        // Create or update Location
+        let location = await Location.findOne({ locationId });
+        if (!location) {
+            location = await Location.create({ locationId, name: locationId });
+        }
+
+        // Create or update GeneratedPair
         const pair = await GeneratedPair.findOneAndUpdate(
             { adId, locationId },
             { 
@@ -411,16 +493,28 @@ app.post('/generate', async (req, res) => {
         const qrCodeDataUrl = await QRCode.toDataURL(url);
 
         const successContent = `
-        <div style="text-align: center;">
-            <h2 style="color: var(--success-color);">✅ QR Code Generated!</h2>
-            <div class="qr-item">
-                <h3>${adId} - ${location.name}</h3>
-                <img src="${qrCodeDataUrl}" style="max-width: 200px;">
-                <p>Tracking URL: ${url}</p>
-                <p>Redirects to: ${pair.customUrl || pair.defaultRedirect}</p>
+        <div style="text-align: center; max-width: 500px; margin: 0 auto;">
+            <div style="font-size: 4rem; color: #10b981; margin-bottom: 1rem;">
+                <i class="fas fa-check-circle"></i>
             </div>
-            <a href="/generate" class="btn btn-success">Generate Another</a>
-            <a href="/" class="btn">Home</a>
+            <h2 style="color: #10b981; margin-bottom: 1rem;">QR Code Generated!</h2>
+            
+            <div style="background: #f8f9fa; padding: 2rem; border-radius: 12px; margin: 2rem 0;">
+                <h3>${adId} - ${location.name}</h3>
+                <img src="${qrCodeDataUrl}" style="max-width: 200px; margin: 1rem 0;">
+                <p style="word-break: break-all; background: white; padding: 1rem; border-radius: 8px;">
+                    <strong>Tracking URL:</strong><br>${url}
+                </p>
+                <p>
+                    <strong>Redirects to:</strong><br>
+                    ${pair.customUrl || pair.defaultRedirect}
+                </p>
+            </div>
+            
+            <div style="display: flex; gap: 1rem; justify-content: center;">
+                <a href="/generate" class="btn btn-success">Generate Another</a>
+                <a href="/" class="btn">Home</a>
+            </div>
         </div>
         `;
 
@@ -437,79 +531,169 @@ app.get('/manage-urls', async (req, res) => {
     try {
         const pairs = await GeneratedPair.find().sort({ updatedAt: -1 });
         
-        let pairsList = pairs.map(pair => `
-        <div class="url-item">
-            <h4>${pair.adId} - ${pair.locationId}</h4>
-            <p>Custom URL: ${pair.customUrl || 'Not set'}</p>
-            <p>Default URL: ${pair.defaultRedirect}</p>
-            <form action="/update-url" method="POST">
-                <input type="hidden" name="adId" value="${pair.adId}">
-                <input type="hidden" name="locationId" value="${pair.locationId}">
-                <input type="url" name="customUrl" value="${pair.customUrl || ''}" placeholder="Custom URL">
-                <button type="submit" class="btn">Update</button>
-            </form>
-        </div>
-        `).join('');
+        let pairsList = '';
+        if (pairs.length > 0) {
+            pairsList = pairs.map(pair => {
+                const hasCustomUrl = !!pair.customUrl;
+                return `
+                <div style="background: #f8f9fa; border-radius: 12px; padding: 1.5rem; margin-bottom: 1rem; border-left: 4px solid ${hasCustomUrl ? '#10b981' : '#4a6fa5'};">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                        <h3 style="margin: 0;">${pair.adId} - ${pair.locationId}</h3>
+                        <span style="background: ${hasCustomUrl ? '#d1fae5' : '#f3f4f6'}; color: ${hasCustomUrl ? '#065f46' : '#374151'}; padding: 0.25rem 0.75rem; border-radius: 20px;">
+                            ${hasCustomUrl ? 'Custom URL' : 'Default URL'}
+                        </span>
+                    </div>
+                    
+                    <div style="margin-bottom: 1rem;">
+                        <p><strong>Custom URL:</strong> ${pair.customUrl || '<em>Not set</em>'}</p>
+                        <p><strong>Default URL:</strong> ${pair.defaultRedirect}</p>
+                    </div>
+                    
+                    <form action="/update-url" method="POST">
+                        <input type="hidden" name="adId" value="${pair.adId}">
+                        <input type="hidden" name="locationId" value="${pair.locationId}">
+                        <div style="display: flex; gap: 0.5rem;">
+                            <input type="url" name="customUrl" value="${pair.customUrl || ''}" 
+                                placeholder="Enter custom URL" 
+                                style="flex: 1; padding: 0.75rem; border: 1px solid #ddd; border-radius: 8px;">
+                            <button type="submit" class="btn" style="padding: 0.75rem 1.5rem;">Update</button>
+                        </div>
+                    </form>
+                </div>
+                `;
+            }).join('');
+        }
 
         const content = `
         <h2>URL Management</h2>
-        ${pairs.length === 0 ? '<p>No QR codes found. Generate one first.</p>' : pairsList}
+        ${pairs.length === 0 ? 
+            '<div class="alert alert-warning">No QR codes found. <a href="/generate">Generate your first QR code</a></div>' : 
+            pairsList}
         `;
         
         res.send(await layout(content, 'Manage URLs'));
     } catch (err) {
+        console.error('Manage URLs error:', err);
         res.status(500).send('Error loading manage URLs');
     }
 });
 
 // ========== UPDATE URL ==========
 app.post('/update-url', async (req, res) => {
-    const { adId, locationId, customUrl } = req.body;
-    await GeneratedPair.findOneAndUpdate(
-        { adId, locationId },
-        { customUrl: customUrl || null }
-    );
-    res.redirect('/manage-urls');
+    try {
+        const { adId, locationId, customUrl } = req.body;
+        
+        await GeneratedPair.findOneAndUpdate(
+            { adId, locationId },
+            { customUrl: customUrl || null }
+        );
+        
+        res.redirect('/manage-urls?updated=true');
+    } catch (err) {
+        console.error('Update URL error:', err);
+        res.status(500).send('Error updating URL');
+    }
 });
 
 // ========== SCANS PAGE ==========
 app.get('/scans', async (req, res) => {
     try {
         const scans = await Scan.find().sort({ timestamp: -1 }).limit(100);
+        const totalScans = await Scan.countDocuments();
+        const uniqueSessions = await Scan.distinct('userSessionId').then(s => s.length);
         
+        let scansTable = '';
+        if (scans.length > 0) {
+            scansTable = `
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse;">
+                    <thead style="background: #4a6fa5; color: white;">
+                        <tr>
+                            <th style="padding: 1rem; text-align: left;">Code</th>
+                            <th style="padding: 1rem; text-align: left;">Location</th>
+                            <th style="padding: 1rem; text-align: left;">Time</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${scans.map(s => `
+                        <tr style="border-bottom: 1px solid #ddd;">
+                            <td style="padding: 1rem;"><code>${s.code}</code></td>
+                            <td style="padding: 1rem;">${s.locationName}</td>
+                            <td style="padding: 1rem;">${moment(s.timestamp).format('YYYY-MM-DD HH:mm:ss')}</td>
+                        </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+            `;
+        }
+
         const content = `
-        <h2>Recent Scans</h2>
-        <table>
-            <tr><th>Code</th><th>Location</th><th>Time</th></tr>
-            ${scans.map(s => `
-                <tr>
-                    <td>${s.code}</td>
-                    <td>${s.locationName}</td>
-                    <td>${moment(s.timestamp).format('YYYY-MM-DD HH:mm')}</td>
-                </tr>
-            `).join('')}
-        </table>
+        <h2>Scan Analytics</h2>
+        
+        <div class="stats-container">
+            <div class="stat-card">
+                <h3>Total Scans</h3>
+                <div class="stat-value">${totalScans}</div>
+            </div>
+            <div class="stat-card">
+                <h3>Unique Users</h3>
+                <div class="stat-value">${uniqueSessions}</div>
+            </div>
+        </div>
+        
+        <h3>Recent Scans</h3>
+        ${scans.length === 0 ? 
+            '<div class="alert alert-warning">No scans recorded yet.</div>' : 
+            scansTable}
         `;
         
         res.send(await layout(content, 'Scan Analytics'));
     } catch (err) {
+        console.error('Scans error:', err);
         res.status(500).send('Error loading scans');
     }
 });
 
 // ========== DOWNLOAD EXCEL ==========
-app.get('/download-qr-excel', (req, res) => {
-    const filePath = path.join(__dirname, 'public', 'qr_metadata.xlsx');
-    if (fs.existsSync(filePath)) {
+app.get('/download-qr-excel', async (req, res) => {
+    try {
+        const pairs = await GeneratedPair.find();
+        
+        const workbook = new ExcelJS.Workbook();
+        const sheet = workbook.addWorksheet('QR Codes');
+        
+        sheet.columns = [
+            { header: 'Ad ID', key: 'adId', width: 15 },
+            { header: 'Location ID', key: 'locationId', width: 15 },
+            { header: 'Custom URL', key: 'customUrl', width: 50 },
+            { header: 'Default URL', key: 'defaultRedirect', width: 50 },
+        ];
+        
+        pairs.forEach(pair => sheet.addRow({
+            adId: pair.adId,
+            locationId: pair.locationId,
+            customUrl: pair.customUrl || '',
+            defaultRedirect: pair.defaultRedirect
+        }));
+        
+        const filePath = path.join(publicDir, 'qr_metadata.xlsx');
+        await workbook.xlsx.writeFile(filePath);
         res.download(filePath);
-    } else {
-        res.status(404).send('File not found');
+    } catch (err) {
+        console.error('Excel error:', err);
+        res.status(500).send('Error generating Excel file');
     }
 });
 
 // ========== 404 HANDLER ==========
 app.use((req, res) => {
-    res.status(404).send('404 - Page Not Found');
+    res.status(404).send(`
+        <div style="text-align: center; padding: 4rem 2rem;">
+            <h1 style="color: #ef4444;">404 - Page Not Found</h1>
+            <a href="/" class="btn">Go to Dashboard</a>
+        </div>
+    `);
 });
 
 // ========== START SERVER ==========
