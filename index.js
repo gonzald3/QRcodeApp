@@ -274,17 +274,26 @@ app.get('/health', (req, res) => {
 });
 
 // ========== TRACKING ROUTE (FIXED) ==========
+// ========== TRACKING ROUTE WITH EXTENSIVE LOGGING ==========
 app.get('/track/:token', async (req, res) => {
+    console.log('\n========== TRACK ROUTE HIT ==========');
+    console.log('Time:', new Date().toISOString());
+    console.log('Token received:', req.params.token);
+    console.log('Full URL:', req.protocol + '://' + req.get('host') + req.originalUrl);
+    console.log('Headers:', JSON.stringify(req.headers, null, 2));
+    
     try {
-        console.log('=== QR CODE SCANNED ===');
-        console.log('Token:', req.params.token);
-        
         // Parse token
         const token = req.params.token;
+        console.log('Raw token:', token);
+        
         const parts = token.split('-');
+        console.log('Token parts:', parts);
+        console.log('Number of parts:', parts.length);
         
         if (parts.length < 3) {
-            console.log('Invalid token format');
+            console.log('❌ ERROR: Token has less than 3 parts');
+            console.log('Redirecting to fallback: https://acp.us');
             return res.redirect('https://acp.us');
         }
         
@@ -292,41 +301,72 @@ app.get('/track/:token', async (req, res) => {
         const locationId = parts.pop();
         const adId = parts.join('-');
         
-        console.log('Ad ID:', adId, 'Location ID:', locationId);
+        console.log('Extracted values:');
+        console.log('- adId:', adId);
+        console.log('- locationId:', locationId);
+        console.log('- hash:', hash.substring(0, 10) + '...');
         
-        // Find redirect URL - FIRST check if this QR code exists
+        // Check if this QR code exists in database
+        console.log('\n🔍 Looking up in GeneratedPair collection...');
+        console.log('Query:', { adId, locationId });
+        
         const pair = await GeneratedPair.findOne({ adId, locationId });
         
         if (!pair) {
-            console.log('❌ QR code not found in database');
+            console.log('❌ ERROR: No matching record found in GeneratedPair table');
+            console.log('Available records in GeneratedPair:');
+            const allPairs = await GeneratedPair.find().limit(5);
+            console.log('Sample records:', JSON.stringify(allPairs, null, 2));
+            console.log('Redirecting to fallback: https://acp.us');
             return res.redirect('https://acp.us');
         }
         
-        let redirectUrl = pair.customUrl || pair.defaultRedirect || 'https://acp.us';
-        console.log('Redirecting to:', redirectUrl);
+        console.log('✅ Found matching record:');
+        console.log('- customUrl:', pair.customUrl);
+        console.log('- defaultRedirect:', pair.defaultRedirect);
         
-        // Track scan (don't await)
+        // Determine redirect URL
+        let redirectUrl = pair.customUrl || pair.defaultRedirect || 'https://acp.us';
+        console.log('🎯 Final redirect URL:', redirectUrl);
+        
+        // Track the scan
+        console.log('\n📝 Recording scan...');
         try {
             const location = await Location.findOne({ locationId });
-            Scan.create({
+            console.log('Location found:', location ? location.name : 'Not found');
+            
+            const scanData = {
                 code: `${adId}-${locationId}`,
                 adId,
                 locationId,
                 locationName: location?.name || locationId,
                 userSessionId: req.cookies.userSessionId || 'anonymous',
-                ipAddress: req.ip,
-                userAgent: req.get('User-Agent')
-            }).catch(err => console.error('Scan save error:', err));
+                ipAddress: req.ip || req.connection.remoteAddress,
+                userAgent: req.get('User-Agent') || 'Unknown'
+            };
+            console.log('Scan data:', JSON.stringify(scanData, null, 2));
+            
+            await Scan.create(scanData);
+            console.log('✅ Scan recorded successfully');
         } catch (scanErr) {
-            console.error('Error creating scan:', scanErr);
+            console.error('❌ Error recording scan:', scanErr.message);
+            // Continue with redirect even if scan fails
         }
         
-        // Redirect
-        res.redirect(redirectUrl);
+        console.log('🔄 Redirecting user to:', redirectUrl);
+        console.log('========== TRACK ROUTE COMPLETE ==========\n');
+        
+        // Perform the redirect
+        return res.redirect(redirectUrl);
         
     } catch (err) {
-        console.error('Track route error:', err);
-        res.redirect('https://acp.us');
+        console.error('❌❌❌ CRITICAL ERROR in track route:');
+        console.error('Error name:', err.name);
+        console.error('Error message:', err.message);
+        console.error('Error stack:', err.stack);
+        console.log('Redirecting to fallback: https://acp.us');
+        console.log('========== TRACK ROUTE ERROR ==========\n');
+        return res.redirect('https://acp.us');
     }
 });
 
