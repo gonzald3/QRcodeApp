@@ -268,6 +268,12 @@ async function layout(content, title = 'QR Code Manager', showNav = true) {
 // ========== MIDDLEWARE ==========
 let recentQrCodeHtml = '';
 
+// Add this at the VERY TOP of your routes, right after middleware
+app.get('/test-route', (req, res) => {
+    console.log('✅ TEST ROUTE HIT at:', new Date().toISOString());
+    res.send('Test route is working! Check your logs.');
+});
+
 // ========== HEALTH CHECK ==========
 app.get('/health', (req, res) => {
     res.status(200).json({ status: 'healthy' });
